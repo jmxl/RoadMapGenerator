@@ -1,0 +1,32 @@
+import { Button, AboutSlint } from "std-widgets.slint";
+
+export component AboutDialog inherits Dialog {
+    width: 400px;
+    height: 300px;
+    title: "关于";
+    icon: @image-url("icon/logo.png");
+    always-on-top: false;
+    no-frame: false;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 10px;
+        Text {
+            text: "Roadmap Generator";
+        }
+        // Display the "Made with Slint" badge to comply with the
+        // Slint Royalty-free license attribution requirement.
+        VerticalLayout {
+            height: 80px;
+            AboutSlint {}
+        }
+    }
+    Button {
+        text: "确定";
+        height: 30px;
+        dialog-button-role: action;
+        clicked => {
+            root.close();
+        }
+    }
+}

@@ -1,0 +1,389 @@
+import { Button, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { AboutDialog } from "about-dialog.slint";
+// Re-export so the Slint compiler generates a Rust type for the dialog.
+export { AboutDialog } from "about-dialog.slint";
+
+struct Milestone {
+    name: string,
+    date-text: string,
+    day: int,
+    color: color,
+    color-text: string,
+}
+
+struct Project {
+    name: string,
+    milestones: [Milestone],
+}
+
+export component AppWindow inherits Window {
+    title: "Roadmap Generator";
+    icon: @image-url("icon/logo.png");
+    width: 1080px;
+    height: 720px;
+
+    in-out property <[Project]> projects: [];
+    in-out property <int> min-day: 0;
+    in-out property <int> max-day: 1;
+    in-out property <int> today-day: -1;
+    in-out property <int> selected-project: -1;
+    in-out property <int> selected-milestone: -1;
+    in-out property <string> selected-milestone-name: "";
+    in-out property <string> status-text: "Ready";
+    in-out property <string> project-name: "";
+    in-out property <string> milestone-name: "";
+    in-out property <string> milestone-date: "";
+    in-out property <length> timeline-pad: 44px;
+    in-out property <length> name-column-width: 150px;
+    in-out property <int> color-preset-index: 0;
+    in-out property <color> preview-color: #2563eb;
+    property <[string]> preset-colors: [
+        "#2563EB", "#DC2626", "#16A34A", "#EA580C", "#7C3AED",
+        "#0D9488", "#64748B", "#B91C1C", "#111827",
+    ];
+
+    // Match a milestone's stored color to a preset index, or -1 if it is not a preset.
+    function preset-index(color-text: string) -> int {
+        if color-text == root.preset-colors[0] { return 0; }
+        if color-text == root.preset-colors[1] { return 1; }
+        if color-text == root.preset-colors[2] { return 2; }
+        if color-text == root.preset-colors[3] { return 3; }
+        if color-text == root.preset-colors[4] { return 4; }
+        if color-text == root.preset-colors[5] { return 5; }
+        if color-text == root.preset-colors[6] { return 6; }
+        if color-text == root.preset-colors[7] { return 7; }
+        if color-text == root.preset-colors[8] { return 8; }
+        return -1;
+    }
+
+    callback request-add-milestone(string, string, string);
+    callback request-new-project(string);
+    callback request-remove-selected-project();
+    callback request-remove-selected-milestone();
+    callback request-clear-all();
+    callback request-export-svg();
+    callback request-export-png();
+    callback request-set-color(string);
+    callback request-about();
+
+    function timeline-x(day: int, width: length) -> length {
+        return root.timeline-pad
+            + (day - root.min-day) * (width - 2 * root.timeline-pad) / (root.max-day - root.min-day);
+    }
+
+    MenuBar {
+        Menu {
+            title: @tr("Help");
+            MenuItem {
+                title: @tr("About");
+                activated => { root.request-about(); }
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        // ---- input panel ----
+        Rectangle {
+            background: #f2f6fc;
+            border-radius: 10px;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        text <=> root.project-name;
+                        placeholder-text: "Project name  (e.g. XXX)";
+                        horizontal-stretch: 2;
+                    }
+                    LineEdit {
+                        text <=> root.milestone-name;
+                        placeholder-text: "Milestone  (e.g. TR1)";
+                        horizontal-stretch: 2;
+                    }
+                    LineEdit {
+                        text <=> root.milestone-date;
+                        placeholder-text: "Date  (yyyy/mm/dd)";
+                        horizontal-stretch: 2;
+                    }
+                    Button {
+                        text: "Add Milestone";
+                        primary: true;
+                        clicked => {
+                            root.request-add-milestone(root.project-name, root.milestone-name, root.milestone-date);
+                        }
+                    }
+                }
+
+                // ---- color picker row ----
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Color:";
+                        vertical-alignment: center;
+                        font-size: 13px;
+                        color: #334155;
+                    }
+                    ComboBox {
+                        model: ["Blue", "Red", "Green", "Orange", "Purple", "Teal", "Gray", "Crimson", "Black"];
+                        current-index: root.color-preset-index;
+                        selected() => {
+                            root.color-preset-index = self.current-index;
+                            root.request-set-color(root.preset-colors[self.current-index]);
+                        }
+                    }
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: #cbd5e1;
+                        background: root.preview-color;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Button {
+                        text: "New Project";
+                        clicked => {
+                            root.request-new-project(root.project-name);
+                        }
+                    }
+                    Button {
+                        text: "Remove Selected Project";
+                        enabled: root.selected-project >= 0;
+                        clicked => { root.request-remove-selected-project(); }
+                    }
+                    Button {
+                        text: "Remove Selected Milestone";
+                        enabled: root.selected-project >= 0 && root.selected-milestone >= 0;
+                        clicked => { root.request-remove-selected-milestone(); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button {
+                        text: "Export SVG";
+                        clicked => { root.request-export-svg(); }
+                    }
+                    Button {
+                        text: "Export PNG";
+                        clicked => { root.request-export-png(); }
+                    }
+                    Button {
+                        text: "Clear All";
+                        clicked => { root.request-clear-all(); }
+                    }
+                }
+            }
+        }
+
+        // ---- roadmap view ----
+        Rectangle {
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: #dde5ee;
+            clip: true;
+            vertical-stretch: 1;
+
+            ScrollView {
+                VerticalLayout {
+                    padding-left: 70px;
+                    padding-right: 70px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    spacing: 0px;
+
+                    Rectangle {
+                        height: 1px;
+                        background: #e2e8f0;
+                    }
+
+                    // "We are here" marker row (hidden when today is outside the visible range)
+                    if root.today-day >= root.min-day && root.today-day <= root.max-day: Rectangle {
+                        height: 30px;
+                        HorizontalLayout {
+                            spacing: 0px;
+                            Rectangle { width: root.name-column-width; } // name column spacer
+                            Rectangle {
+                                // dashed vertical line starting right below the label
+                                Rectangle {
+                                    x: root.timeline-x(root.today-day, parent.width) - 1px;
+                                    y: 20px;
+                                    width: 2px;
+                                    height: 10px;
+                                    Rectangle { y: 0px; height: 4px; width: 100%; background: #dc2626; }
+                                    Rectangle { y: 6px; height: 4px; width: 100%; background: #dc2626; }
+                                }
+                                // label centered horizontally on the line, sitting above it
+                                Text {
+                                    x: root.timeline-x(root.today-day, parent.width) - 35px;
+                                    y: 0px;
+                                    width: 70px;
+                                    height: 18px;
+                                    text: "We are here";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: #dc2626;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    // empty hint
+                    if root.projects.length == 0: Rectangle {
+                        height: 80px;
+                        HorizontalLayout {
+                            VerticalLayout {
+                                alignment: center;
+                                Text {
+                                    text: "No projects yet - add one above.";
+                                    color: #94a3b8;
+                                    font-size: 14px;
+                                }
+                            }
+                        }
+                    }
+
+                    // project rows
+                    for project[pidx] in root.projects: Rectangle {
+                        height: 64px;
+                        background: root.selected-project == pidx ? #e2ecff : (Math.mod(pidx, 2) == 0 ? #ffffff : #f7fafd);
+
+                        HorizontalLayout {
+                            spacing: 0px;
+
+                            // name cell
+                            Rectangle {
+                                width: root.name-column-width;
+                                VerticalLayout {
+                                    alignment: center;
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    spacing: 2px;
+                                    Text {
+                                        text: project.name;
+                                        font-size: 14px;
+                                        font-weight: 700;
+                                        color: #0f172a;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: "\{project.milestones.length} milestone(s)";
+                                        font-size: 11px;
+                                        color: #94a3b8;
+                                    }
+                                }
+                                TouchArea {
+                                    clicked => {
+                                        root.selected-project = pidx;
+                                        root.selected-milestone = -1;
+                                        root.project-name = project.name;
+                                        // reflect the project's current color (first milestone's)
+                                        if project.milestones.length > 0 {
+                                            root.preview-color = project.milestones[0].color;
+                                            root.color-preset-index = root.preset-index(project.milestones[0].color-text) >= 0
+                                                ? root.preset-index(project.milestones[0].color-text)
+                                                : root.color-preset-index;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // timeline cell
+                            timeline-cell := Rectangle {
+                                clip: true;
+
+                                // baseline
+                                Rectangle {
+                                    y: parent.height / 2 - 1px;
+                                    width: parent.width;
+                                    height: 2px;
+                                    background: #d3dce6;
+                                }
+
+                                // "We are here" dashed line segment (today marker)
+                                if root.today-day >= root.min-day && root.today-day <= root.max-day: Rectangle {
+                                    x: root.timeline-x(root.today-day, timeline-cell.width) - 1px;
+                                    width: 2px;
+                                    height: 100%;
+                                    Rectangle { y: 0px; height: 8px; width: 100%; background: #dc2626; }
+                                    Rectangle { y: 16px; height: 8px; width: 100%; background: #dc2626; }
+                                    Rectangle { y: 32px; height: 8px; width: 100%; background: #dc2626; }
+                                    Rectangle { y: 48px; height: 8px; width: 100%; background: #dc2626; }
+                                }
+
+                                // milestones
+                                for ms[msidx] in project.milestones: Rectangle {
+                                    x: root.timeline-x(ms.day, timeline-cell.width) - 45px;
+                                    width: 90px;
+                                    height: 100%;
+                                    background: root.selected-project == pidx && root.selected-milestone == msidx ? #d9e6ff : transparent;
+                                    border-radius: 8px;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        padding: 4px;
+                                        spacing: 1px;
+                                        Text {
+                                            text: ms.name;
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: ms.color;
+                                            horizontal-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            Rectangle {
+                                                width: 10px;
+                                                height: 10px;
+                                                border-radius: 2px;
+                                                background: ms.color;
+                                                transform-rotation: 45deg;
+                                                transform-origin: { x: 5px, y: 5px };
+                                            }
+                                        }
+                                        Text {
+                                            text: ms.date-text;
+                                            font-size: 10px;
+                                            color: #64748b;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        clicked => {
+                                            root.selected-project = pidx;
+                                            root.selected-milestone = msidx;
+                                            root.selected-milestone-name = ms.name;
+                                            root.project-name = project.name;
+                                            root.preview-color = ms.color;
+                                            // highlight the matching preset in the ComboBox (if any)
+                                            root.color-preset-index = root.preset-index(ms.color-text) >= 0
+                                                ? root.preset-index(ms.color-text)
+                                                : root.color-preset-index;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // status bar
+        Text {
+            text: root.status-text;
+            color: #64748b;
+            font-size: 12px;
+        }
+    }
+}
