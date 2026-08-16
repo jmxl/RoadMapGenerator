@@ -72,8 +72,8 @@ pub fn t(key: &str) -> &'static str {
 pub fn t_in(lang: Lang, key: &str) -> &'static str {
     match (lang, key) {
         // ---- main window ----
-        (Lang::En, "app-title") => "Roadmap Generator",
-        (Lang::Zh, "app-title") => "路线图生成器",
+        (Lang::En, "app-title") => concat!("Roadmap Generator - ", env!("CARGO_PKG_VERSION")),
+        (Lang::Zh, "app-title") => concat!("路线图生成器 - ", env!("CARGO_PKG_VERSION")),
         (Lang::En, "menu-settings") => "Settings",
         (Lang::Zh, "menu-settings") => "设置",
         (Lang::En, "menu-help") => "Help",

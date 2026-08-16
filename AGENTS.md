@@ -34,5 +34,5 @@ Desktop roadmap planner (Slint UI + Rust). Projects are rows with milestones on 
 ## Platform quirks
 
 - Release builds set `windows_subsystem = "windows"` → no console window; `eprintln!` (e.g. parse errors from `data::load`) is invisible in release.
-- Exe icon comes from `ui/icon/logo.ico` embedded via `app.rc` + `embed-resource` (no-op on non-Windows). `ui/icon/logo.png` is the in-app window icon (`@image-url("icon/logo.png")`, resolved relative to the `.slint` file).
+- Exe icon comes from `ui/icon/logo.ico` embedded by `winresource` in `build.rs` (`WindowsResource::set_icon`, no `app.rc` file; no-op on non-Windows targets). `ui/icon/logo.png` is the in-app window icon (`@image-url("icon/logo.png")`, resolved relative to the `.slint` file).
 - PNG export relies on system fonts via `resvg`'s `fontdb.load_system_fonts()`.

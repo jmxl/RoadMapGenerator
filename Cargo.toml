@@ -3,6 +3,10 @@ name = "RoadMapGenerator"
 version = "0.1.0"
 edition = "2024"
 
+[package.metadata.winresource]
+OriginalFilename = "RoadMapGenerator.exe"
+LegalCopyright = "Copyright © 2026"
+
 [dependencies]
 slint = "1.17.1"
 serde = { version = "1", features = ["derive"] }
@@ -16,7 +20,7 @@ png = "0.18"
 
 [build-dependencies]
 slint-build = "1.17.1"
-embed-resource = "2"
+winresource = "0.1"
 
 [profile.release]
 codegen-units = 1
