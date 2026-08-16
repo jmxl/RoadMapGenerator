@@ -6,10 +6,10 @@ mod export;
 mod i18n;
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use data::{day_number, format_date, normalize_theme, RoadmapData};
+use data::{day_number, format_date, normalize_theme, ConfigData, RoadmapData};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use slint::private_unstable_api::re_exports::ColorScheme;
 
@@ -46,25 +46,30 @@ fn config_path() -> PathBuf {
     config_dir().join("config.json")
 }
 
+/// Shared, mutable application state handed to every UI callback: the roadmap
+/// data and the settings, each behind a `RefCell`, plus the paths of their
+/// JSON files. Callbacks capture a single `Rc<AppContext>` instead of cloning
+/// the `Rc<RefCell<_>>`/`PathBuf` pairs individually.
+struct AppContext {
+    data: RefCell<RoadmapData>,
+    config: RefCell<ConfigData>,
+    data_file: PathBuf,
+    cfg_file: PathBuf,
+}
+
 /// Convert a Slint color to its `#RRGGBB` string form.
 fn color_to_hex(c: slint::Color) -> String {
     format!("#{:02X}{:02X}{:02X}", c.red(), c.green(), c.blue())
 }
 
 /// Parse a `#RRGGBB` string into a Slint color, falling back to brand blue.
+/// Delegates the hex parsing to `data::parse_rgb` (the single parser shared
+/// with the data layer) instead of maintaining a second one here.
 fn parse_slint_color(hex: &str) -> slint::Color {
-    let h = hex.trim().strip_prefix('#').unwrap_or(hex.trim());
-    if h.len() == 6
-        && h.chars().all(|c| c.is_ascii_hexdigit())
-        && let Ok(v) = u32::from_str_radix(h, 16)
-    {
-        return slint::Color::from_rgb_u8(
-            ((v >> 16) & 0xFF) as u8,
-            ((v >> 8) & 0xFF) as u8,
-            (v & 0xFF) as u8,
-        );
+    match data::parse_rgb(hex) {
+        Some((r, g, b)) => slint::Color::from_rgb_u8(r, g, b),
+        None => slint::Color::from_rgb_u8(0x25, 0x63, 0xeb),
     }
-    slint::Color::from_rgb_u8(0x25, 0x63, 0xeb)
 }
 
 /// Convert the persistent data into Slint models and the shared time range.
@@ -179,6 +184,24 @@ fn screen_size() -> Option<(u32, u32)> {
     None
 }
 
+/// Persist the roadmap, surfacing a failure in the status bar (and stderr).
+/// A failed save is otherwise invisible to the user, who would believe their
+/// data was persisted.
+fn save_data_or_status(ui: &AppWindow, data: &RoadmapData, path: &Path) {
+    if let Err(e) = data::save(data, path) {
+        ui.set_status_text(i18n::sub(i18n::t("status-save-error"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
+        eprintln!("Failed to save roadmap data to {}: {e}", path.display());
+    }
+}
+
+/// Persist the settings, surfacing a failure in the status bar (and stderr).
+fn save_config_or_status(ui: &AppWindow, config: &ConfigData, path: &Path) {
+    if let Err(e) = data::save_config(config, path) {
+        ui.set_status_text(i18n::sub(i18n::t("status-save-error"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
+        eprintln!("Failed to save settings to {}: {e}", path.display());
+    }
+}
+
 /// Force the color scheme of both windows via the widget style's `Palette`
 /// global. `ColorScheme::Unknown` restores "follow the system" (the widget
 /// styles fall back to the OS scheme in that case).
@@ -250,17 +273,20 @@ fn set_i18n_globals(g: &I18n, lang: i18n::Lang) {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_file = data_path();
     let cfg_file = config_path();
-
-    let data = Rc::new(RefCell::new(data::load(&data_file)));
-    let config = Rc::new(RefCell::new(data::load_config(&cfg_file)));
+    let app = Rc::new(AppContext {
+        data: RefCell::new(data::load(&data_file)),
+        config: RefCell::new(data::load_config(&cfg_file)),
+        data_file,
+        cfg_file,
+    });
 
     let ui = AppWindow::new()?;
-    refresh_ui(&ui, &data.borrow());
+    refresh_ui(&ui, &app.data.borrow());
 
     // Settings window (theme picker). Created before any callback wiring so the
     // initial theme can be applied to both windows up front.
     let settings = Rc::new(SettingsWindow::new()?);
-    apply_theme(&ui, &settings, config.borrow().theme.as_str());
+    apply_theme(&ui, &settings, app.config.borrow().theme.as_str());
 
     // About dialog is created up front (like the settings window) so its
     // `I18n` global can be filled at startup and on language switch.
@@ -268,16 +294,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Language: normalize the persisted code, make it the process-wide current
     // language, then push every translated string into the UI.
-    let lang = i18n::Lang::from_code(&data::normalize_language(&config.borrow().language));
+    let lang = i18n::Lang::from_code(&data::normalize_language(&app.config.borrow().language));
     i18n::set_current(lang);
     apply_language(&ui, &settings, &about, lang);
 
     {
-        let n = data.borrow().projects.len();
+        let n = app.data.borrow().projects.len();
         if n > 0 {
-            ui.set_status_text(i18n::sub(i18n::t("status-loaded"), &[("n", n.to_string()), ("path", data_file.display().to_string())]).into());
+            ui.set_status_text(i18n::sub(i18n::t("status-loaded"), &[("n", n.to_string()), ("path", app.data_file.display().to_string())]).into());
         } else {
-            ui.set_status_text(i18n::sub(i18n::t("status-no-data"), &[("path", data_file.display().to_string())]).into());
+            ui.set_status_text(i18n::sub(i18n::t("status-no-data"), &[("path", app.data_file.display().to_string())]).into());
         }
     }
 
@@ -303,11 +329,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Add a milestone (creates the project if needed).
     {
         let weak = ui_weak.clone();
-        let data = data.clone();
-        let data_file = data_file.clone();
+        let app = app.clone();
         ui.on_request_add_milestone(move |project, milestone, date| {
             let Some(ui) = weak.upgrade() else { return };
-            let mut d = data.borrow_mut();
+            let mut d = app.data.borrow_mut();
             let color = color_to_hex(ui.get_preview_color());
             match data::add_milestone(&mut d, project.as_str(), milestone.as_str(), date.as_str(), &color) {
                 Ok(()) => {
@@ -315,7 +340,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_milestone_name("".into());
                     ui.set_milestone_date("".into());
                     ui.set_status_text(i18n::sub(i18n::t("status-added"), &[("milestone", milestone.to_string()), ("date", date.to_string()), ("project", project.to_string())]).into());
-                    let _ = data::save(&d, &data_file);
+                    save_data_or_status(&ui, &d, &app.data_file);
                 }
                 Err(e) => ui.set_status_text(e.into()),
             }
@@ -325,11 +350,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Apply a new color:
     // - a milestone is selected -> only that milestone changes color;
     // - only a project is selected -> every milestone of that project changes.
-    // The parsed color is fed back to the UI.
+    // The parsed color is fed back to the UI. Milestone matching is by NAME
+    // (in data.rs) because the UI model is date-sorted while the stored data
+    // keeps insertion order; the project index IS comparable.
     {
         let weak = ui_weak.clone();
-        let data = data.clone();
-        let data_file = data_file.clone();
+        let app = app.clone();
         ui.on_request_set_color(move |input| {
             let Some(ui) = weak.upgrade() else { return };
             match data::parse_color(input.as_str()) {
@@ -338,44 +364,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_preview_color(parse_slint_color(&color));
                     let pidx = ui.get_selected_project();
                     let midx = ui.get_selected_milestone();
-                    let mut d = data.borrow_mut();
-                    if pidx >= 0 && (pidx as usize) < d.projects.len() {
+                    let mut d = app.data.borrow_mut();
+                    if pidx >= 0 {
                         let ms_name = ui.get_selected_milestone_name().to_string();
-                        if !ms_name.is_empty()
-                            && d.projects[pidx as usize]
-                                .milestones
-                                .iter()
-                                .any(|m| m.name.eq_ignore_ascii_case(&ms_name))
-                        {
-                            // Milestone selected: recolor just this one. Match by NAME,
-                            // not by index, because the UI model is date-sorted while
-                            // the stored data keeps insertion order.
-                            for m in &mut d.projects[pidx as usize].milestones {
-                                if m.name.eq_ignore_ascii_case(&ms_name) {
-                                    m.color = color.clone();
-                                }
-                            }
+                        if !ms_name.is_empty() && data::recolor_milestone(&mut d, pidx as usize, &ms_name, &color) {
                             refresh_ui(&ui, &d);
                             // refresh_ui resets selection; restore it so the user
                             // can keep tweaking the same milestone.
                             ui.set_selected_project(pidx);
                             ui.set_selected_milestone(midx);
                             ui.set_selected_milestone_name(ms_name.into());
-                            let _ = data::save(&d, &data_file);
+                            save_data_or_status(&ui, &d, &app.data_file);
                             ui.set_status_text(i18n::sub(i18n::t("status-color-milestone"), &[("color", color.to_string())]).into());
-                        } else {
+                        } else if data::recolor_project(&mut d, pidx as usize, &color) {
                             // Only the project is selected: recolor all its milestones.
                             let name = d.projects[pidx as usize].name.clone();
-                            for m in &mut d.projects[pidx as usize].milestones {
-                                m.color = color.clone();
-                            }
                             refresh_ui(&ui, &d);
                             ui.set_selected_project(pidx);
                             ui.set_selected_milestone(-1);
-                            let _ = data::save(&d, &data_file);
+                            save_data_or_status(&ui, &d, &app.data_file);
                             ui.set_status_text(
                                 i18n::sub(i18n::t("status-color-project"), &[("color", color.to_string()), ("name", name.to_string())]).into(),
                             );
+                        } else {
+                            ui.set_status_text(i18n::sub(i18n::t("status-color-noselect"), &[("color", color.to_string())]).into());
                         }
                     } else {
                         ui.set_status_text(i18n::sub(i18n::t("status-color-noselect"), &[("color", color.to_string())]).into());
@@ -389,17 +401,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create an empty project.
     {
         let weak = ui_weak.clone();
-        let data = data.clone();
-        let data_file = data_file.clone();
+        let app = app.clone();
         ui.on_request_new_project(move |project| {
             let Some(ui) = weak.upgrade() else { return };
-            let mut d = data.borrow_mut();
+            let mut d = app.data.borrow_mut();
             match data::add_project(&mut d, project.as_str()) {
                 Ok(()) => {
                     refresh_ui(&ui, &d);
                     ui.set_project_name("".into());
                     ui.set_status_text(i18n::sub(i18n::t("status-created"), &[("project", project.to_string())]).into());
-                    let _ = data::save(&d, &data_file);
+                    save_data_or_status(&ui, &d, &app.data_file);
                 }
                 Err(e) => ui.set_status_text(e.into()),
             }
@@ -409,8 +420,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Remove the selected project.
     {
         let weak = ui_weak.clone();
-        let data = data.clone();
-        let data_file = data_file.clone();
+        let app = app.clone();
         ui.on_request_remove_selected_project(move || {
             let Some(ui) = weak.upgrade() else { return };
             let idx = ui.get_selected_project();
@@ -418,13 +428,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_status_text(i18n::t("status-select-project").into());
                 return;
             }
-            let mut d = data.borrow_mut();
-            if (idx as usize) < d.projects.len() {
-                let name = d.projects[idx as usize].name.clone();
-                d.projects.remove(idx as usize);
+            let mut d = app.data.borrow_mut();
+            if let Some(name) = data::remove_project(&mut d, idx as usize) {
                 refresh_ui(&ui, &d);
                 ui.set_status_text(i18n::sub(i18n::t("status-removed-project"), &[("name", name.to_string())]).into());
-                let _ = data::save(&d, &data_file);
+                save_data_or_status(&ui, &d, &app.data_file);
             }
         });
     }
@@ -432,8 +440,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Remove the selected milestone.
     {
         let weak = ui_weak.clone();
-        let data = data.clone();
-        let data_file = data_file.clone();
+        let app = app.clone();
         ui.on_request_remove_selected_milestone(move || {
             let Some(ui) = weak.upgrade() else { return };
             let pidx = ui.get_selected_project();
@@ -442,21 +449,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_status_text(i18n::t("status-select-milestone").into());
                 return;
             }
-            let mut d = data.borrow_mut();
-            if let Some(p) = d.projects.get_mut(pidx as usize) {
-                // Match by NAME: the UI model is date-sorted while the stored
-                // data keeps insertion order, so indices are not comparable.
-                let project_name = p.name.clone();
-                match p.milestones.iter().position(|m| m.name.eq_ignore_ascii_case(&ms_name)) {
-                    Some(pos) => {
-                        let name = p.milestones[pos].name.clone();
-                        p.milestones.remove(pos);
-                        refresh_ui(&ui, &d);
-                        ui.set_status_text(i18n::sub(i18n::t("status-removed-milestone"), &[("name", name.to_string()), ("project", project_name.to_string())]).into());
-                        let _ = data::save(&d, &data_file);
-                    }
-                    None => ui.set_status_text(i18n::sub(i18n::t("status-ms-not-found"), &[("name", ms_name.to_string()), ("project", project_name.to_string())]).into()),
+            let mut d = app.data.borrow_mut();
+            // Match by NAME (in data.rs): the UI model is date-sorted while the
+            // stored data keeps insertion order, so indices are not comparable.
+            let Some(p) = d.projects.get(pidx as usize) else { return };
+            let project_name = p.name.clone();
+            match data::remove_milestone(&mut d, pidx as usize, &ms_name) {
+                Some(name) => {
+                    refresh_ui(&ui, &d);
+                    ui.set_status_text(i18n::sub(i18n::t("status-removed-milestone"), &[("name", name.to_string()), ("project", project_name.to_string())]).into());
+                    save_data_or_status(&ui, &d, &app.data_file);
                 }
+                None => ui.set_status_text(i18n::sub(i18n::t("status-ms-not-found"), &[("name", ms_name.to_string()), ("project", project_name.to_string())]).into()),
             }
         });
     }
@@ -464,25 +468,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Clear everything.
     {
         let weak = ui_weak.clone();
-        let data = data.clone();
-        let data_file = data_file.clone();
+        let app = app.clone();
         ui.on_request_clear_all(move || {
             let Some(ui) = weak.upgrade() else { return };
-            let mut d = data.borrow_mut();
+            let mut d = app.data.borrow_mut();
             d.projects.clear();
             refresh_ui(&ui, &d);
             ui.set_status_text(i18n::t("status-cleared").into());
-            let _ = data::save(&d, &data_file);
+            save_data_or_status(&ui, &d, &app.data_file);
         });
     }
 
     // Export SVG.
     {
         let weak = ui_weak.clone();
-        let data = data.clone();
+        let app = app.clone();
         ui.on_request_export_svg(move || {
             let Some(ui) = weak.upgrade() else { return };
-            let d = data.borrow();
+            let d = app.data.borrow();
             match export::export_svg(&d) {
                 Ok(msg) => ui.set_status_text(msg.into()),
                 Err(e) => ui.set_status_text(e.into()),
@@ -493,10 +496,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Export PNG.
     {
         let weak = ui_weak.clone();
-        let data = data.clone();
+        let app = app.clone();
         ui.on_request_export_png(move || {
             let Some(ui) = weak.upgrade() else { return };
-            let d = data.borrow();
+            let d = app.data.borrow();
             match export::export_png(&d) {
                 Ok(msg) => ui.set_status_text(msg.into()),
                 Err(e) => ui.set_status_text(e.into()),
@@ -521,17 +524,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // apply to both windows.
     {
         let ui_weak = ui_weak.clone();
-        let config = config.clone();
-        let cfg_file = cfg_file.clone();
+        let app = app.clone();
         let settings_cb = settings.clone();
         settings.on_theme_changed(move |theme| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let theme = normalize_theme(theme.as_str());
             {
-                let mut c = config.borrow_mut();
+                let mut c = app.config.borrow_mut();
                 if c.theme != theme {
                     c.theme = theme.clone();
-                    let _ = data::save_config(&c, &cfg_file);
+                    save_config_or_status(&ui, &c, &app.cfg_file);
                 }
             }
             apply_theme(&ui, &settings_cb, &theme);
@@ -544,9 +546,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // models (milestone counts are localized).
     {
         let ui_weak = ui_weak.clone();
-        let data = data.clone();
-        let config = config.clone();
-        let cfg_file = cfg_file.clone();
+        let app = app.clone();
         let settings_cb = settings.clone();
         let about_cb = about.clone();
         settings.on_language_changed(move |code| {
@@ -554,14 +554,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let lang = i18n::Lang::from_code(code.as_str());
             i18n::set_current(lang);
             {
-                let mut c = config.borrow_mut();
+                let mut c = app.config.borrow_mut();
                 if c.language != lang.code() {
                     c.language = lang.code().into();
-                    let _ = data::save_config(&c, &cfg_file);
+                    save_config_or_status(&ui, &c, &app.cfg_file);
                 }
             }
             apply_language(&ui, &settings_cb, &about_cb, lang);
-            refresh_ui(&ui, &data.borrow());
+            refresh_ui(&ui, &app.data.borrow());
             ui.set_status_text(i18n::sub(i18n::t("status-language"), &[("label", lang.label().to_string())]).into());
         });
     }
@@ -580,10 +580,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let run_result = ui.run();
 
     // Auto-save on exit (both files are also saved after every change).
-    if let Err(e) = data::save(&data.borrow(), &data_file) {
+    if let Err(e) = data::save(&app.data.borrow(), &app.data_file) {
         eprintln!("Failed to save roadmap data: {e}");
     }
-    if let Err(e) = data::save_config(&config.borrow(), &cfg_file) {
+    if let Err(e) = data::save_config(&app.config.borrow(), &app.cfg_file) {
         eprintln!("Failed to save settings: {e}");
     }
 

@@ -164,6 +164,8 @@ pub fn t_in(lang: Lang, key: &str) -> &'static str {
         (Lang::Zh, "status-theme") => "主题已设为 {theme}",
         (Lang::En, "status-language") => "Language set to {label}",
         (Lang::Zh, "status-language") => "语言已切换为 {label}",
+        (Lang::En, "status-save-error") => "Failed to save to {path}: {error}",
+        (Lang::Zh, "status-save-error") => "保存到 {path} 失败：{error}",
 
         // ---- data validation errors ----
         (Lang::En, "err-date-required") => "Date is required",

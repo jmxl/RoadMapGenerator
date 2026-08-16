@@ -220,6 +220,57 @@ pub fn add_project(data: &mut RoadmapData, project: &str) -> Result<(), String> 
     Ok(())
 }
 
+/// Recolor every milestone whose name matches `ms_name` (case-insensitive)
+/// inside the project at `project_idx`. Returns whether any milestone was
+/// recolored. Matching is by name, never by index: the UI model is
+/// date-sorted while the stored data keeps insertion order.
+pub fn recolor_milestone(data: &mut RoadmapData, project_idx: usize, ms_name: &str, color: &str) -> bool {
+    let Some(p) = data.projects.get_mut(project_idx) else {
+        return false;
+    };
+    let mut recolored = false;
+    for m in &mut p.milestones {
+        if m.name.eq_ignore_ascii_case(ms_name) {
+            m.color = color.to_string();
+            recolored = true;
+        }
+    }
+    recolored
+}
+
+/// Recolor every milestone of the project at `project_idx`. Returns whether
+/// the project exists (out-of-range indices are a no-op).
+pub fn recolor_project(data: &mut RoadmapData, project_idx: usize, color: &str) -> bool {
+    match data.projects.get_mut(project_idx) {
+        Some(p) => {
+            for m in &mut p.milestones {
+                m.color = color.to_string();
+            }
+            true
+        }
+        None => false,
+    }
+}
+
+/// Remove the milestone named `ms_name` (case-insensitive) from the project
+/// at `project_idx`, returning its name. Returns `None` when the project is
+/// out of range or no milestone matches.
+pub fn remove_milestone(data: &mut RoadmapData, project_idx: usize, ms_name: &str) -> Option<String> {
+    let p = data.projects.get_mut(project_idx)?;
+    let pos = p.milestones.iter().position(|m| m.name.eq_ignore_ascii_case(ms_name))?;
+    Some(p.milestones.remove(pos).name)
+}
+
+/// Remove the project at `project_idx`, returning its name. Returns `None`
+/// when the index is out of range.
+pub fn remove_project(data: &mut RoadmapData, project_idx: usize) -> Option<String> {
+    if project_idx < data.projects.len() {
+        Some(data.projects.remove(project_idx).name)
+    } else {
+        None
+    }
+}
+
 /// Days since the Unix epoch (1970-01-01). Used as the Slint `int` coordinate.
 pub fn day_number(date: NaiveDate) -> i32 {
     date.signed_duration_since(epoch()).num_days() as i32
@@ -251,12 +302,23 @@ pub fn parse_color(s: &str) -> Result<String, String> {
         return Ok(format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]));
     }
     // #RRGGBB or RRGGBB
-    let h = t.strip_prefix('#').unwrap_or(t);
-    if h.len() != 6 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(i18n::sub(i18n::t("err-invalid-color"), &[("t", t.to_string())]));
+    match parse_rgb(t) {
+        Some((r, g, b)) => Ok(format!("#{r:02X}{g:02X}{b:02X}")),
+        None => Err(i18n::sub(i18n::t("err-invalid-color"), &[("t", t.to_string())])),
     }
-    let v = u32::from_str_radix(h, 16).map_err(|_| i18n::sub(i18n::t("err-invalid-color"), &[("t", t.to_string())]))?;
-    Ok(format!("#{:06X}", v & 0xFFFFFF))
+}
+
+/// Parse a `#RRGGBB` or `RRGGBB` string into its `(r, g, b)` components.
+/// The single hex parser shared by the data layer (`parse_color`) and the
+/// UI layer (Slint `Color` conversion) so both accept exactly the same input.
+pub fn parse_rgb(hex: &str) -> Option<(u8, u8, u8)> {
+    let h = hex.trim().strip_prefix('#').unwrap_or(hex.trim());
+    if h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit())
+        && let Ok(v) = u32::from_str_radix(h, 16)
+    {
+        return Some((((v >> 16) & 0xFF) as u8, ((v >> 8) & 0xFF) as u8, (v & 0xFF) as u8));
+    }
+    None
 }
 
 fn epoch() -> NaiveDate {
@@ -312,10 +374,76 @@ mod tests {
     }
 
     #[test]
+    fn parses_hex_rgb_components() {
+        assert_eq!(parse_rgb("#FF0000"), Some((255, 0, 0)));
+        assert_eq!(parse_rgb("00ff00"), Some((0, 255, 0)));
+        assert_eq!(parse_rgb("#123456"), Some((0x12, 0x34, 0x56)));
+        assert_eq!(parse_rgb(""), None);
+        assert_eq!(parse_rgb("xyz"), None);
+        assert_eq!(parse_rgb("#12345"), None);
+    }
+
+    #[test]
     fn add_project_rejects_duplicates() {
         let mut data = RoadmapData::default();
         add_project(&mut data, "SPN").unwrap();
         assert!(add_project(&mut data, "spn").is_err());
+    }
+
+    #[test]
+    fn recolor_milestone_matches_by_name_case_insensitively() {
+        let mut data = RoadmapData::default();
+        add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
+        add_milestone(&mut data, "SPN", "TR2", "2026/09/01", "#2563eb").unwrap();
+
+        assert!(recolor_milestone(&mut data, 0, "tr1", "#FF0000"));
+        assert_eq!(data.projects[0].milestones[0].color, "#FF0000");
+        // The sibling milestone is untouched.
+        assert_eq!(data.projects[0].milestones[1].color, "#2563EB");
+
+        // Unknown name: no-op, reports nothing recolored.
+        assert!(!recolor_milestone(&mut data, 0, "nope", "#00FF00"));
+        // Out-of-range project: no-op.
+        assert!(!recolor_milestone(&mut data, 9, "TR1", "#000000"));
+    }
+
+    #[test]
+    fn recolor_project_recolors_all_milestones() {
+        let mut data = RoadmapData::default();
+        add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
+        add_milestone(&mut data, "SPN", "TR2", "2026/09/01", "#2563eb").unwrap();
+
+        assert!(recolor_project(&mut data, 0, "#FF0000"));
+        assert!(data.projects[0].milestones.iter().all(|m| m.color == "#FF0000"));
+        // Out-of-range project: no-op.
+        assert!(!recolor_project(&mut data, 9, "#00FF00"));
+    }
+
+    #[test]
+    fn remove_milestone_matches_by_name_case_insensitively() {
+        let mut data = RoadmapData::default();
+        add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
+        add_milestone(&mut data, "SPN", "TR2", "2026/09/01", "#2563eb").unwrap();
+
+        assert_eq!(remove_milestone(&mut data, 0, "tr2"), Some("TR2".into()));
+        assert_eq!(data.projects[0].milestones.len(), 1);
+        // Already removed: not found again.
+        assert_eq!(remove_milestone(&mut data, 0, "tr2"), None);
+        assert_eq!(remove_milestone(&mut data, 0, "nope"), None);
+        // Out-of-range project: not found.
+        assert_eq!(remove_milestone(&mut data, 9, "TR1"), None);
+    }
+
+    #[test]
+    fn remove_project_removes_by_index() {
+        let mut data = RoadmapData::default();
+        add_project(&mut data, "SPN").unwrap();
+        add_project(&mut data, "TRN").unwrap();
+
+        assert_eq!(remove_project(&mut data, 1), Some("TRN".into()));
+        assert_eq!(data.projects.len(), 1);
+        assert_eq!(data.projects[0].name, "SPN");
+        assert_eq!(remove_project(&mut data, 9), None);
     }
 
     #[test]
