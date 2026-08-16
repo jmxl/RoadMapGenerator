@@ -5,7 +5,7 @@ export component SettingsWindow inherits Window {
     title: I18n.settings-title;
     icon: @image-url("icon/settings.png");
     width: 420px;
-    height: 320px;
+    height: 420px;
 
     // UI theme: "auto" (follow system), "light" or "dark".
     in-out property <string> theme: "auto";
@@ -13,6 +13,10 @@ export component SettingsWindow inherits Window {
     // UI language code: "en" (English) or "zh" (中文).
     in-out property <string> language: "en";
     callback language-changed(string);
+    // Directory holding data.json (set from Rust when the window opens).
+    in-out property <string> data-dir-path: "";
+    callback request-pick-data-dir();
+    callback request-reset-data-dir();
 
     property <bool> dark: StyleMetrics.window-background.to-oklch().lightness < 0.5;
 
@@ -63,6 +67,35 @@ export component SettingsWindow inherits Window {
             text: I18n.lang-hint;
             font-size: 12px;
             color: dark ? #8b98ab : #64748b;
+        }
+
+        Rectangle {
+            height: 1px;
+            background: dark ? #3b4453 : #dde5ee;
+        }
+
+        Text {
+            text: I18n.settings-data-dir;
+            font-size: 14px;
+            font-weight: 700;
+            color: dark ? #e2e8f0 : #0f172a;
+        }
+        Text {
+            text: root.data-dir-path;
+            font-size: 12px;
+            color: dark ? #8b98ab : #64748b;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Button {
+                text: I18n.btn-pick-data-dir;
+                clicked => { root.request-pick-data-dir(); }
+            }
+            Button {
+                text: I18n.btn-reset-data-dir;
+                clicked => { root.request-reset-data-dir(); }
+            }
         }
 
         HorizontalLayout {

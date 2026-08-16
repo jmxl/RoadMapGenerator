@@ -39,8 +39,8 @@ impl Default for RoadmapData {
     }
 }
 
-/// App settings (theme + language), persisted separately from the roadmap
-/// data in `config.json` under the user data directory.
+/// App settings (theme + language + data location), persisted separately
+/// from the roadmap data in `config.json` under the user data directory.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConfigData {
     /// UI theme preference: "auto" (follow system), "light" or "dark".
@@ -49,6 +49,10 @@ pub struct ConfigData {
     /// UI language code: "en" (English) or "zh" (中文).
     #[serde(default = "default_language")]
     pub language: String,
+    /// Custom directory for `data.json`. `None` = the default
+    /// `~/Documents/RoadMaps` location.
+    #[serde(default)]
+    pub data_dir: Option<String>,
 }
 
 impl Default for ConfigData {
@@ -56,6 +60,7 @@ impl Default for ConfigData {
         Self {
             theme: default_theme(),
             language: default_language(),
+            data_dir: None,
         }
     }
 }
@@ -475,20 +480,24 @@ mod tests {
         let mut config = ConfigData::default();
         config.theme = "dark".into();
         config.language = "zh".into();
+        config.data_dir = Some("/data".into());
         save_config(&config, &path).unwrap();
         let loaded = load_config(&path);
         assert_eq!(loaded.theme, "dark");
         assert_eq!(loaded.language, "zh");
+        assert_eq!(loaded.data_dir, Some("/data".into()));
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn config_with_missing_fields_defaults() {
-        // JSON written before the theme/language fields existed must still load.
+        // JSON written before the theme/language/data_dir fields existed must
+        // still load.
         let json = r##"{}"##;
         let config: ConfigData = serde_json::from_str(json).unwrap();
         assert_eq!(config.theme, "auto");
         assert_eq!(config.language, "zh");
+        assert_eq!(config.data_dir, None);
     }
 
     #[test]

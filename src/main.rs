@@ -6,7 +6,7 @@ mod export;
 mod i18n;
 
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use data::{day_number, format_date, normalize_theme, ConfigData, RoadmapData};
@@ -36,25 +36,69 @@ fn home_dir() -> Option<PathBuf> {
     }
 }
 
-/// Roadmap data (`projects`) lives in `~/.RoadMapGenerator/data.json`.
-fn data_path() -> PathBuf {
-    config_dir().join("data.json")
+/// Default directory for the roadmap data: `~/Documents/RoadMaps`. Unlike the
+/// settings (which stay in the hidden `~/.RoadMapGenerator` folder), the
+/// roadmap data is a user document, so it lives under the user's Documents.
+fn default_data_dir() -> PathBuf {
+    home_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        .join("Documents")
+        .join("RoadMaps")
 }
 
-/// App settings (theme, language) live in `~/.RoadMapGenerator/config.json`.
+/// Roadmap data (`projects`) lives in `data.json` inside the configured data
+/// directory: a user-chosen folder from `ConfigData.data_dir`, or the default
+/// `~/Documents/RoadMaps` when unset.
+fn data_path(config: &ConfigData) -> PathBuf {
+    match &config.data_dir {
+        Some(dir) => PathBuf::from(dir).join("data.json"),
+        None => default_data_dir().join("data.json"),
+    }
+}
+
+/// App settings (theme, language, data location) live in
+/// `~/.RoadMapGenerator/config.json`.
 fn config_path() -> PathBuf {
     config_dir().join("config.json")
 }
 
 /// Shared, mutable application state handed to every UI callback: the roadmap
-/// data and the settings, each behind a `RefCell`, plus the paths of their
-/// JSON files. Callbacks capture a single `Rc<AppContext>` instead of cloning
-/// the `Rc<RefCell<_>>`/`PathBuf` pairs individually.
+/// data and the settings, each behind a `RefCell`. The JSON file paths are
+/// derived from `ConfigData` (see `AppContext::data_path`), so they can never
+/// drift from the configured data directory. Callbacks capture a single
+/// `Rc<AppContext>` instead of cloning state individually; `ui` is only ever
+/// captured as a weak handle to avoid an `Rc` cycle.
 struct AppContext {
     data: RefCell<RoadmapData>,
     config: RefCell<ConfigData>,
-    data_file: PathBuf,
-    cfg_file: PathBuf,
+}
+
+impl AppContext {
+    /// Path of the roadmap data file, always derived from the configured data
+    /// directory so it stays in sync with `ConfigData.data_dir`.
+    fn data_path(&self) -> PathBuf {
+        data_path(&self.config.borrow())
+    }
+
+    /// Persist the roadmap, surfacing a failure in the status bar (and stderr).
+    /// A failed save is otherwise invisible to the user, who would believe
+    /// their data was persisted.
+    fn save_data_or_status(&self, ui: &AppWindow, data: &RoadmapData) {
+        let path = self.data_path();
+        if let Err(e) = data::save(data, &path) {
+            ui.set_status_text(i18n::sub(i18n::t("status-save-error"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
+            eprintln!("Failed to save roadmap data to {}: {e}", path.display());
+        }
+    }
+
+    /// Persist the settings, surfacing a failure in the status bar (and stderr).
+    fn save_config_or_status(&self, ui: &AppWindow, config: &ConfigData) {
+        let path = config_path();
+        if let Err(e) = data::save_config(config, &path) {
+            ui.set_status_text(i18n::sub(i18n::t("status-save-error"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
+            eprintln!("Failed to save settings to {}: {e}", path.display());
+        }
+    }
 }
 
 /// Convert a Slint color to its `#RRGGBB` string form.
@@ -184,24 +228,6 @@ fn screen_size() -> Option<(u32, u32)> {
     None
 }
 
-/// Persist the roadmap, surfacing a failure in the status bar (and stderr).
-/// A failed save is otherwise invisible to the user, who would believe their
-/// data was persisted.
-fn save_data_or_status(ui: &AppWindow, data: &RoadmapData, path: &Path) {
-    if let Err(e) = data::save(data, path) {
-        ui.set_status_text(i18n::sub(i18n::t("status-save-error"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
-        eprintln!("Failed to save roadmap data to {}: {e}", path.display());
-    }
-}
-
-/// Persist the settings, surfacing a failure in the status bar (and stderr).
-fn save_config_or_status(ui: &AppWindow, config: &ConfigData, path: &Path) {
-    if let Err(e) = data::save_config(config, path) {
-        ui.set_status_text(i18n::sub(i18n::t("status-save-error"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
-        eprintln!("Failed to save settings to {}: {e}", path.display());
-    }
-}
-
 /// Force the color scheme of both windows via the widget style's `Palette`
 /// global. `ColorScheme::Unknown` restores "follow the system" (the widget
 /// styles fall back to the OS scheme in that case).
@@ -255,6 +281,9 @@ fn set_i18n_globals(g: &I18n, lang: i18n::Lang) {
     g.set_theme_hint(t(lang, "theme-hint").into());
     g.set_lang_label(t(lang, "lang-label").into());
     g.set_lang_hint(t(lang, "lang-hint").into());
+    g.set_settings_data_dir(t(lang, "settings-data-dir").into());
+    g.set_btn_pick_data_dir(t(lang, "btn-pick-data-dir").into());
+    g.set_btn_reset_data_dir(t(lang, "btn-reset-data-dir").into());
     g.set_btn_close(t(lang, "btn-close").into());
     g.set_about_title(t(lang, "about-title").into());
     g.set_about_btn(t(lang, "about-btn").into());
@@ -271,13 +300,11 @@ fn set_i18n_globals(g: &I18n, lang: i18n::Lang) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let data_file = data_path();
-    let cfg_file = config_path();
+    let config = data::load_config(&config_path());
+    let data_file = data_path(&config);
     let app = Rc::new(AppContext {
         data: RefCell::new(data::load(&data_file)),
-        config: RefCell::new(data::load_config(&cfg_file)),
-        data_file,
-        cfg_file,
+        config: RefCell::new(config),
     });
 
     let ui = AppWindow::new()?;
@@ -301,9 +328,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let n = app.data.borrow().projects.len();
         if n > 0 {
-            ui.set_status_text(i18n::sub(i18n::t("status-loaded"), &[("n", n.to_string()), ("path", app.data_file.display().to_string())]).into());
+            ui.set_status_text(i18n::sub(i18n::t("status-loaded"), &[("n", n.to_string()), ("path", data_file.display().to_string())]).into());
         } else {
-            ui.set_status_text(i18n::sub(i18n::t("status-no-data"), &[("path", app.data_file.display().to_string())]).into());
+            ui.set_status_text(i18n::sub(i18n::t("status-no-data"), &[("path", data_file.display().to_string())]).into());
         }
     }
 
@@ -340,7 +367,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_milestone_name("".into());
                     ui.set_milestone_date("".into());
                     ui.set_status_text(i18n::sub(i18n::t("status-added"), &[("milestone", milestone.to_string()), ("date", date.to_string()), ("project", project.to_string())]).into());
-                    save_data_or_status(&ui, &d, &app.data_file);
+                    app.save_data_or_status(&ui, &d);
                 }
                 Err(e) => ui.set_status_text(e.into()),
             }
@@ -374,7 +401,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ui.set_selected_project(pidx);
                             ui.set_selected_milestone(midx);
                             ui.set_selected_milestone_name(ms_name.into());
-                            save_data_or_status(&ui, &d, &app.data_file);
+                            app.save_data_or_status(&ui, &d);
                             ui.set_status_text(i18n::sub(i18n::t("status-color-milestone"), &[("color", color.to_string())]).into());
                         } else if data::recolor_project(&mut d, pidx as usize, &color) {
                             // Only the project is selected: recolor all its milestones.
@@ -382,7 +409,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             refresh_ui(&ui, &d);
                             ui.set_selected_project(pidx);
                             ui.set_selected_milestone(-1);
-                            save_data_or_status(&ui, &d, &app.data_file);
+                            app.save_data_or_status(&ui, &d);
                             ui.set_status_text(
                                 i18n::sub(i18n::t("status-color-project"), &[("color", color.to_string()), ("name", name.to_string())]).into(),
                             );
@@ -410,7 +437,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     refresh_ui(&ui, &d);
                     ui.set_project_name("".into());
                     ui.set_status_text(i18n::sub(i18n::t("status-created"), &[("project", project.to_string())]).into());
-                    save_data_or_status(&ui, &d, &app.data_file);
+                    app.save_data_or_status(&ui, &d);
                 }
                 Err(e) => ui.set_status_text(e.into()),
             }
@@ -432,7 +459,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(name) = data::remove_project(&mut d, idx as usize) {
                 refresh_ui(&ui, &d);
                 ui.set_status_text(i18n::sub(i18n::t("status-removed-project"), &[("name", name.to_string())]).into());
-                save_data_or_status(&ui, &d, &app.data_file);
+                app.save_data_or_status(&ui, &d);
             }
         });
     }
@@ -458,7 +485,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(name) => {
                     refresh_ui(&ui, &d);
                     ui.set_status_text(i18n::sub(i18n::t("status-removed-milestone"), &[("name", name.to_string()), ("project", project_name.to_string())]).into());
-                    save_data_or_status(&ui, &d, &app.data_file);
+                    app.save_data_or_status(&ui, &d);
                 }
                 None => ui.set_status_text(i18n::sub(i18n::t("status-ms-not-found"), &[("name", ms_name.to_string()), ("project", project_name.to_string())]).into()),
             }
@@ -475,7 +502,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             d.projects.clear();
             refresh_ui(&ui, &d);
             ui.set_status_text(i18n::t("status-cleared").into());
-            save_data_or_status(&ui, &d, &app.data_file);
+            app.save_data_or_status(&ui, &d);
         });
     }
 
@@ -513,8 +540,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let ui_weak = ui_weak.clone();
         let settings = settings.clone();
+        let app = app.clone();
         ui.on_request_settings(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
+            // Keep the "Save Location" row in sync with the current config.
+            settings.set_data_dir_path(app.data_path().display().to_string().into());
             let _ = settings.show();
             center_on_parent(ui.window(), settings.window());
         });
@@ -533,7 +563,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut c = app.config.borrow_mut();
                 if c.theme != theme {
                     c.theme = theme.clone();
-                    save_config_or_status(&ui, &c, &app.cfg_file);
+                    app.save_config_or_status(&ui, &c);
                 }
             }
             apply_theme(&ui, &settings_cb, &theme);
@@ -557,7 +587,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut c = app.config.borrow_mut();
                 if c.language != lang.code() {
                     c.language = lang.code().into();
-                    save_config_or_status(&ui, &c, &app.cfg_file);
+                    app.save_config_or_status(&ui, &c);
                 }
             }
             apply_language(&ui, &settings_cb, &about_cb, lang);
@@ -577,13 +607,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Pick a custom directory for data.json (settings window). The app reloads
+    // from the new location; existing data is not migrated.
+    {
+        let ui_weak = ui_weak.clone();
+        let app = app.clone();
+        let settings_cb = settings.clone();
+        settings.on_request_pick_data_dir(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let Some(dir) = rfd::FileDialog::new()
+                .set_title(i18n::t("dlg-pick-data-dir").to_string())
+                .pick_folder()
+            else { return };
+            {
+                let mut c = app.config.borrow_mut();
+                c.data_dir = Some(dir.display().to_string());
+                app.save_config_or_status(&ui, &c);
+            }
+            let data_file = app.data_path();
+            *app.data.borrow_mut() = data::load(&data_file);
+            refresh_ui(&ui, &app.data.borrow());
+            settings_cb.set_data_dir_path(data_file.display().to_string().into());
+            ui.set_status_text(i18n::sub(i18n::t("status-data-dir-changed"), &[("path", data_file.display().to_string())]).into());
+        });
+    }
+
+    // Reset the data directory back to the default ~/Documents/RoadMaps.
+    {
+        let ui_weak = ui_weak.clone();
+        let app = app.clone();
+        let settings_cb = settings.clone();
+        settings.on_request_reset_data_dir(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            {
+                let mut c = app.config.borrow_mut();
+                if c.data_dir.is_some() {
+                    c.data_dir = None;
+                    app.save_config_or_status(&ui, &c);
+                }
+            }
+            let data_file = app.data_path();
+            *app.data.borrow_mut() = data::load(&data_file);
+            refresh_ui(&ui, &app.data.borrow());
+            settings_cb.set_data_dir_path(data_file.display().to_string().into());
+            ui.set_status_text(i18n::sub(i18n::t("status-data-dir-reset"), &[("path", data_file.display().to_string())]).into());
+        });
+    }
+
     let run_result = ui.run();
 
     // Auto-save on exit (both files are also saved after every change).
-    if let Err(e) = data::save(&app.data.borrow(), &app.data_file) {
+    if let Err(e) = data::save(&app.data.borrow(), &app.data_path()) {
         eprintln!("Failed to save roadmap data: {e}");
     }
-    if let Err(e) = data::save_config(&app.config.borrow(), &app.cfg_file) {
+    if let Err(e) = data::save_config(&app.config.borrow(), &config_path()) {
         eprintln!("Failed to save settings: {e}");
     }
 
