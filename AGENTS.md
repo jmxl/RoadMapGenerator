@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Desktop roadmap planner (Slint UI + Rust). Projects are rows with milestones on a shared timeline; data persists to `roadmap.json`; exports SVG/PNG.
+Desktop roadmap planner (Slint UI + Rust). Projects are rows with milestones on a shared timeline; data persists to `~/.RoadMapGenerator/data.json`, settings to `~/.RoadMapGenerator/config.json`; exports SVG/PNG.
 
 ## Build & verify
 
@@ -11,7 +11,7 @@ Desktop roadmap planner (Slint UI + Rust). Projects are rows with milestones on 
 
 ## Architecture
 
-- `src/data.rs` — pure data model (`RoadmapData`/`ProjectData`/`MilestoneData`), JSON load/save, date & color parsing, day-number math, `text_width` heuristic. No Slint dependency.
+- `src/data.rs` — pure data model (`RoadmapData`/`ProjectData`/`MilestoneData`/`ConfigData`), JSON load/save, date & color parsing, day-number math, `text_width` heuristic. No Slint dependency.
 - `src/export.rs` — hand-built SVG string + PNG rasterization (resvg @2x) + `rfd` save dialogs.
 - `src/main.rs` — everything else: `slint::include_modules!()`, converts `data` ↔ Slint models, all `on_request_*` callback wiring.
 - `src/i18n.rs` — EN/ZH dictionary + process-wide current language (`t`/`t_in`/`t_list`/`sub`). No Slint dependency.
@@ -24,10 +24,10 @@ Desktop roadmap planner (Slint UI + Rust). Projects are rows with milestones on 
 ## Non-obvious invariants (do not break)
 
 - **Milestone matching is by NAME, never by index.** The Slint UI model is date-sorted (`build_models` in main.rs) while `RoadmapData` keeps insertion order. Selection, removal, and recolor all use case-insensitive name matching (`eq_ignore_ascii_case`). `add_milestone` rejects duplicate milestone names per project, which is what makes name matching safe.
-- **`roadmap.json` location**: `data_path()` uses `current_dir()`, not `current_exe()` — project root for `cargo run`, exe folder when the exe is double-clicked. The file is gitignored; it's auto-saved after every mutation and on exit.
+- **Data & settings split**: roadmap data (`RoadmapData.projects`) lives in `~/.RoadMapGenerator/data.json`; app settings (`ConfigData.theme` / `ConfigData.language`) live in `~/.RoadMapGenerator/config.json`. `config_dir()` resolves the home dir from `%USERPROFILE%` (Windows) / `$HOME` (elsewhere), falling back to `current_dir()` when it is unknown — never `current_exe()`. Both files are auto-saved after every mutation and on exit; the directory is created lazily on first save (`data::save`/`data::save_config`). `export.rs` reads the language from the process-wide `i18n::current()`, not from the data.
 - **Dates**: JSON stores chrono `NaiveDate` (ISO `yyyy-mm-dd`); input parsing accepts `yyyy/mm/dd`, `yyyy-mm-dd`, `yyyy.mm.dd`; UI displays `yyyy/mm/dd`.
 - **Colors** are normalized to uppercase `#RRGGBB` (`data::parse_color`; accepts `#RRGGBB`, `RRGGBB`, `r,g,b`). Default is brand blue `#2563eb` via serde default. Milestone colors stored per-milestone; a selected project recolors all its milestones, a selected milestone recolors only itself.
-- **i18n**: All user-visible strings (EN/ZH) live in the dictionary in `src/i18n.rs` (`t`/`t_in`/`t_list`; `{name}` placeholders are filled with `i18n::sub`, never `format!` — it rejects runtime format strings). The UI layer copies them into the `I18n` global in `ui/i18n.slint` via `apply_language` (main.rs); all three `.slint` files import it and re-export through `app-window.slint`. The language is persisted as `RoadmapData.language` (`"en"`/`"zh"`, serde default `"en"`); the process-wide current language is `i18n::set_current`, so data/export error strings translate without threading a language parameter. `build_models` fills `Project.milestone-count` per language, and `refresh_ui` is re-run on language switch to update those rows.
+- **i18n**: All user-visible strings (EN/ZH) live in the dictionary in `src/i18n.rs` (`t`/`t_in`/`t_list`; `{name}` placeholders are filled with `i18n::sub`, never `format!` — it rejects runtime format strings). The UI layer copies them into the `I18n` global in `ui/i18n.slint` via `apply_language` (main.rs); all three `.slint` files import it and re-export through `app-window.slint`. The language is persisted as `ConfigData.language` (`"en"`/`"zh"`, serde default `"en"`); the process-wide current language is `i18n::set_current`, so data/export error strings translate without threading a language parameter. `build_models` fills `Project.milestone-count` per language, and `refresh_ui` is re-run on language switch to update those rows.
 - **`data::text_width`** (0.6em ASCII / 1.0em CJK heuristic) sizes both the UI name column and the SVG export layout — keep both usages in sync when changing font metrics.
 
 ## Platform quirks

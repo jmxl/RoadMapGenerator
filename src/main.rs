@@ -15,12 +15,35 @@ use slint::private_unstable_api::re_exports::ColorScheme;
 
 slint::include_modules!();
 
-/// JSON data file lives next to the working directory (for `cargo run` this
-/// is the project root; for a double-clicked exe it is the exe folder).
+/// User data directory: `~/.RoadMapGenerator` (Windows: `%USERPROFILE%`,
+/// elsewhere: `$HOME`). Falls back to the working directory when the home
+/// dir cannot be determined. Created lazily on first save.
+fn config_dir() -> PathBuf {
+    home_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        .join(".RoadMapGenerator")
+}
+
+/// Best-effort home directory, avoiding the deprecated `std::env::home_dir`.
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+/// Roadmap data (`projects`) lives in `~/.RoadMapGenerator/data.json`.
 fn data_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("roadmap.json")
+    config_dir().join("data.json")
+}
+
+/// App settings (theme, language) live in `~/.RoadMapGenerator/config.json`.
+fn config_path() -> PathBuf {
+    config_dir().join("config.json")
 }
 
 /// Convert a Slint color to its `#RRGGBB` string form.
@@ -178,8 +201,11 @@ fn set_i18n_globals(g: &I18n, lang: i18n::Lang) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let path = data_path();
-    let data = Rc::new(RefCell::new(data::load(&path)));
+    let data_file = data_path();
+    let cfg_file = config_path();
+
+    let data = Rc::new(RefCell::new(data::load(&data_file)));
+    let config = Rc::new(RefCell::new(data::load_config(&cfg_file)));
 
     let ui = AppWindow::new()?;
     refresh_ui(&ui, &data.borrow());
@@ -187,7 +213,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Settings window (theme picker). Created before any callback wiring so the
     // initial theme can be applied to both windows up front.
     let settings = Rc::new(SettingsWindow::new()?);
-    apply_theme(&ui, &settings, data.borrow().theme.as_str());
+    apply_theme(&ui, &settings, config.borrow().theme.as_str());
 
     // About dialog is created up front (like the settings window) so its
     // `I18n` global can be filled at startup and on language switch.
@@ -195,16 +221,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Language: normalize the persisted code, make it the process-wide current
     // language, then push every translated string into the UI.
-    let lang = i18n::Lang::from_code(&data::normalize_language(&data.borrow().language));
+    let lang = i18n::Lang::from_code(&data::normalize_language(&config.borrow().language));
     i18n::set_current(lang);
     apply_language(&ui, &settings, &about, lang);
 
     {
         let n = data.borrow().projects.len();
         if n > 0 {
-            ui.set_status_text(i18n::sub(i18n::t("status-loaded"), &[("n", n.to_string()), ("path", path.display().to_string())]).into());
+            ui.set_status_text(i18n::sub(i18n::t("status-loaded"), &[("n", n.to_string()), ("path", data_file.display().to_string())]).into());
         } else {
-            ui.set_status_text(i18n::sub(i18n::t("status-no-data"), &[("path", path.display().to_string())]).into());
+            ui.set_status_text(i18n::sub(i18n::t("status-no-data"), &[("path", data_file.display().to_string())]).into());
         }
     }
 
@@ -214,7 +240,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let weak = ui_weak.clone();
         let data = data.clone();
-        let path = path.clone();
+        let data_file = data_file.clone();
         ui.on_request_add_milestone(move |project, milestone, date| {
             let Some(ui) = weak.upgrade() else { return };
             let mut d = data.borrow_mut();
@@ -225,7 +251,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_milestone_name("".into());
                     ui.set_milestone_date("".into());
                     ui.set_status_text(i18n::sub(i18n::t("status-added"), &[("milestone", milestone.to_string()), ("date", date.to_string()), ("project", project.to_string())]).into());
-                    let _ = data::save(&d, &path);
+                    let _ = data::save(&d, &data_file);
                 }
                 Err(e) => ui.set_status_text(e.into()),
             }
@@ -239,7 +265,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let weak = ui_weak.clone();
         let data = data.clone();
-        let path = path.clone();
+        let data_file = data_file.clone();
         ui.on_request_set_color(move |input| {
             let Some(ui) = weak.upgrade() else { return };
             match data::parse_color(input.as_str()) {
@@ -271,7 +297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ui.set_selected_project(pidx);
                             ui.set_selected_milestone(midx);
                             ui.set_selected_milestone_name(ms_name.into());
-                            let _ = data::save(&d, &path);
+                            let _ = data::save(&d, &data_file);
                             ui.set_status_text(i18n::sub(i18n::t("status-color-milestone"), &[("color", color.to_string())]).into());
                         } else {
                             // Only the project is selected: recolor all its milestones.
@@ -282,7 +308,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             refresh_ui(&ui, &d);
                             ui.set_selected_project(pidx);
                             ui.set_selected_milestone(-1);
-                            let _ = data::save(&d, &path);
+                            let _ = data::save(&d, &data_file);
                             ui.set_status_text(
                                 i18n::sub(i18n::t("status-color-project"), &[("color", color.to_string()), ("name", name.to_string())]).into(),
                             );
@@ -300,7 +326,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let weak = ui_weak.clone();
         let data = data.clone();
-        let path = path.clone();
+        let data_file = data_file.clone();
         ui.on_request_new_project(move |project| {
             let Some(ui) = weak.upgrade() else { return };
             let mut d = data.borrow_mut();
@@ -309,7 +335,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     refresh_ui(&ui, &d);
                     ui.set_project_name("".into());
                     ui.set_status_text(i18n::sub(i18n::t("status-created"), &[("project", project.to_string())]).into());
-                    let _ = data::save(&d, &path);
+                    let _ = data::save(&d, &data_file);
                 }
                 Err(e) => ui.set_status_text(e.into()),
             }
@@ -320,7 +346,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let weak = ui_weak.clone();
         let data = data.clone();
-        let path = path.clone();
+        let data_file = data_file.clone();
         ui.on_request_remove_selected_project(move || {
             let Some(ui) = weak.upgrade() else { return };
             let idx = ui.get_selected_project();
@@ -334,7 +360,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 d.projects.remove(idx as usize);
                 refresh_ui(&ui, &d);
                 ui.set_status_text(i18n::sub(i18n::t("status-removed-project"), &[("name", name.to_string())]).into());
-                let _ = data::save(&d, &path);
+                let _ = data::save(&d, &data_file);
             }
         });
     }
@@ -343,7 +369,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let weak = ui_weak.clone();
         let data = data.clone();
-        let path = path.clone();
+        let data_file = data_file.clone();
         ui.on_request_remove_selected_milestone(move || {
             let Some(ui) = weak.upgrade() else { return };
             let pidx = ui.get_selected_project();
@@ -363,7 +389,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         p.milestones.remove(pos);
                         refresh_ui(&ui, &d);
                         ui.set_status_text(i18n::sub(i18n::t("status-removed-milestone"), &[("name", name.to_string()), ("project", project_name.to_string())]).into());
-                        let _ = data::save(&d, &path);
+                        let _ = data::save(&d, &data_file);
                     }
                     None => ui.set_status_text(i18n::sub(i18n::t("status-ms-not-found"), &[("name", ms_name.to_string()), ("project", project_name.to_string())]).into()),
                 }
@@ -375,14 +401,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let weak = ui_weak.clone();
         let data = data.clone();
-        let path = path.clone();
+        let data_file = data_file.clone();
         ui.on_request_clear_all(move || {
             let Some(ui) = weak.upgrade() else { return };
             let mut d = data.borrow_mut();
             d.projects.clear();
             refresh_ui(&ui, &d);
             ui.set_status_text(i18n::t("status-cleared").into());
-            let _ = data::save(&d, &path);
+            let _ = data::save(&d, &data_file);
         });
     }
 
@@ -422,20 +448,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // Theme changes from the settings window: persist, then apply to both windows.
+    // Theme changes from the settings window: persist to config.json, then
+    // apply to both windows.
     {
         let ui_weak = ui_weak.clone();
-        let data = data.clone();
-        let path = path.clone();
+        let config = config.clone();
+        let cfg_file = cfg_file.clone();
         let settings_cb = settings.clone();
         settings.on_theme_changed(move |theme| {
             let Some(ui) = ui_weak.upgrade() else { return };
             let theme = normalize_theme(theme.as_str());
             {
-                let mut d = data.borrow_mut();
-                if d.theme != theme {
-                    d.theme = theme.clone();
-                    let _ = data::save(&d, &path);
+                let mut c = config.borrow_mut();
+                if c.theme != theme {
+                    c.theme = theme.clone();
+                    let _ = data::save_config(&c, &cfg_file);
                 }
             }
             apply_theme(&ui, &settings_cb, &theme);
@@ -443,13 +470,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // Language changes from the settings window: persist, then re-apply every
-    // translated string to all three windows and rebuild the models
-    // (milestone counts are localized).
+    // Language changes from the settings window: persist to config.json, then
+    // re-apply every translated string to all three windows and rebuild the
+    // models (milestone counts are localized).
     {
         let ui_weak = ui_weak.clone();
         let data = data.clone();
-        let path = path.clone();
+        let config = config.clone();
+        let cfg_file = cfg_file.clone();
         let settings_cb = settings.clone();
         let about_cb = about.clone();
         settings.on_language_changed(move |code| {
@@ -457,10 +485,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let lang = i18n::Lang::from_code(code.as_str());
             i18n::set_current(lang);
             {
-                let mut d = data.borrow_mut();
-                if d.language != lang.code() {
-                    d.language = lang.code().into();
-                    let _ = data::save(&d, &path);
+                let mut c = config.borrow_mut();
+                if c.language != lang.code() {
+                    c.language = lang.code().into();
+                    let _ = data::save_config(&c, &cfg_file);
                 }
             }
             apply_language(&ui, &settings_cb, &about_cb, lang);
@@ -479,9 +507,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let run_result = ui.run();
 
-    // Auto-save on exit (data is also saved after every change).
-    if let Err(e) = data::save(&data.borrow(), &path) {
+    // Auto-save on exit (both files are also saved after every change).
+    if let Err(e) = data::save(&data.borrow(), &data_file) {
         eprintln!("Failed to save roadmap data: {e}");
+    }
+    if let Err(e) = data::save_config(&config.borrow(), &cfg_file) {
+        eprintln!("Failed to save settings: {e}");
     }
 
     run_result?;

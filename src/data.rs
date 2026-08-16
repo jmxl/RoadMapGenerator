@@ -29,6 +29,20 @@ pub struct ProjectData {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoadmapData {
     pub projects: Vec<ProjectData>,
+}
+
+impl Default for RoadmapData {
+    fn default() -> Self {
+        Self {
+            projects: Vec::new(),
+        }
+    }
+}
+
+/// App settings (theme + language), persisted separately from the roadmap
+/// data in `config.json` under the user data directory.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConfigData {
     /// UI theme preference: "auto" (follow system), "light" or "dark".
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -37,10 +51,9 @@ pub struct RoadmapData {
     pub language: String,
 }
 
-impl Default for RoadmapData {
+impl Default for ConfigData {
     fn default() -> Self {
         Self {
-            projects: Vec::new(),
             theme: default_theme(),
             language: default_language(),
         }
@@ -88,10 +101,45 @@ pub fn load(path: &Path) -> RoadmapData {
     }
 }
 
-/// Persist the roadmap to `path` as pretty JSON.
+/// Persist the roadmap to `path` as pretty JSON, creating the parent
+/// directory (the user data folder) on first save.
 pub fn save(data: &RoadmapData, path: &Path) -> Result<(), String> {
+    ensure_parent_dir(path)?;
     let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+/// Load the app settings from `path`. Returns the defaults if the file
+/// does not exist or cannot be parsed (the error is logged to stderr).
+pub fn load_config(path: &Path) -> ConfigData {
+    match std::fs::read_to_string(path) {
+        Ok(text) => match serde_json::from_str(&text) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Failed to parse {}: {e}", path.display());
+                ConfigData::default()
+            }
+        },
+        Err(_) => ConfigData::default(),
+    }
+}
+
+/// Persist the app settings to `path` as pretty JSON, creating the parent
+/// directory (the user data folder) on first save.
+pub fn save_config(config: &ConfigData, path: &Path) -> Result<(), String> {
+    ensure_parent_dir(path)?;
+    let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+/// Create the parent directory of `path` unless it already exists.
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Roughly estimate the rendered width (px) of `s` at the given font size.
@@ -274,24 +322,53 @@ mod tests {
     fn save_load_roundtrip() {
         let path = std::env::temp_dir().join(format!("roadmap_test_{}.json", std::process::id()));
         let mut data = RoadmapData::default();
-        data.theme = "dark".into();
         add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
         save(&data, &path).unwrap();
         let loaded = load(&path);
         assert_eq!(loaded.projects.len(), 1);
         assert_eq!(loaded.projects[0].milestones[0].date, date(2026, 8, 20));
-        assert_eq!(loaded.theme, "dark");
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
-    fn old_json_without_theme_defaults_to_auto() {
-        // JSON written before the theme field existed must still load.
-        let json = r##"{"projects":[{"name":"SPN","milestones":[{"name":"TR1","date":"2026-08-20","color":"#2563EB"}]}]}"##;
+    fn legacy_combined_json_still_loads_projects() {
+        // JSON written before the data/settings split (projects + settings in
+        // one file) must still load; serde ignores the unknown settings keys.
+        let json = r##"{"projects":[{"name":"SPN","milestones":[{"name":"TR1","date":"2026-08-20","color":"#2563EB"}]}],"theme":"light","language":"zh"}"##;
         let data: RoadmapData = serde_json::from_str(json).unwrap();
-        assert_eq!(data.theme, "auto");
-        assert_eq!(data.language, "en");
         assert_eq!(data.projects.len(), 1);
+        assert_eq!(data.projects[0].name, "SPN");
+    }
+
+    #[test]
+    fn config_roundtrip() {
+        let path = std::env::temp_dir().join(format!("config_test_{}.json", std::process::id()));
+        let mut config = ConfigData::default();
+        config.theme = "dark".into();
+        config.language = "zh".into();
+        save_config(&config, &path).unwrap();
+        let loaded = load_config(&path);
+        assert_eq!(loaded.theme, "dark");
+        assert_eq!(loaded.language, "zh");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn config_with_missing_fields_defaults() {
+        // JSON written before the theme/language fields existed must still load.
+        let json = r##"{}"##;
+        let config: ConfigData = serde_json::from_str(json).unwrap();
+        assert_eq!(config.theme, "auto");
+        assert_eq!(config.language, "en");
+    }
+
+    #[test]
+    fn save_creates_missing_parent_dir() {
+        let dir = std::env::temp_dir().join(format!("roadmap_dir_test_{}", std::process::id()));
+        let path = dir.join("data.json");
+        save(&RoadmapData::default(), &path).unwrap();
+        assert!(path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -304,7 +381,7 @@ mod tests {
 
     #[test]
     fn default_language_is_english() {
-        assert_eq!(RoadmapData::default().language, "en");
+        assert_eq!(ConfigData::default().language, "en");
     }
 
     #[test]
