@@ -144,6 +144,41 @@ fn center_on_parent(parent: &slint::Window, child: &slint::Window) {
     ));
 }
 
+/// Center the main window on the primary screen at startup. On platforms
+/// without a screen-size query the OS default placement is kept.
+fn center_on_screen(win: &slint::Window) {
+    if let Some((sw, sh)) = screen_size() {
+        let size = win.size();
+        win.set_position(slint::PhysicalPosition::new(
+            ((sw as i32 - size.width as i32) / 2).max(0),
+            ((sh as i32 - size.height as i32) / 2).max(0),
+        ));
+    }
+}
+
+/// Primary screen size in physical pixels, via `user32` on Windows.
+#[cfg(windows)]
+fn screen_size() -> Option<(u32, u32)> {
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetSystemMetrics(n_index: std::ffi::c_int) -> std::ffi::c_int;
+    }
+    const SM_CXSCREEN: std::ffi::c_int = 0;
+    const SM_CYSCREEN: std::ffi::c_int = 1;
+    let w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    if w > 0 && h > 0 {
+        Some((w as u32, h as u32))
+    } else {
+        None
+    }
+}
+
+#[cfg(not(windows))]
+fn screen_size() -> Option<(u32, u32)> {
+    None
+}
+
 /// Force the color scheme of both windows via the widget style's `Palette`
 /// global. `ColorScheme::Unknown` restores "follow the system" (the widget
 /// styles fall back to the OS scheme in that case).
@@ -247,6 +282,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let ui_weak = ui.as_weak();
+
+    // The winit window is created lazily, so `size()` reports (0,0) before the
+    // window is shown. Recenter on the primary screen once the first frame has
+    // rendered and the real size is known (no-op where it cannot be queried).
+    let startup_center = slint::Timer::default();
+    {
+        let weak = ui_weak.clone();
+        startup_center.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_millis(100),
+            move || {
+                if let Some(ui) = weak.upgrade() {
+                    center_on_screen(ui.window());
+                }
+            },
+        );
+    }
 
     // Add a milestone (creates the project if needed).
     {
@@ -452,14 +504,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // Show the settings window, centered on the main window.
+    // Show the settings window, centered on the main window. The window must be
+// shown first: before that its winit window does not exist and `size()` is
+// (0,0).
     {
         let ui_weak = ui_weak.clone();
         let settings = settings.clone();
         ui.on_request_settings(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
-            center_on_parent(ui.window(), settings.window());
             let _ = settings.show();
+            center_on_parent(ui.window(), settings.window());
         });
     }
 
@@ -512,14 +566,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // About dialog, centered on the main window.
+    // About dialog, centered on the main window (shown first so its size is real).
     {
         let ui_weak = ui_weak.clone();
         let about = about.clone();
         ui.on_request_about(move || {
             let Some(ui) = ui_weak.upgrade() else { return };
-            center_on_parent(ui.window(), about.window());
             let _ = about.show();
+            center_on_parent(ui.window(), about.window());
         });
     }
 
