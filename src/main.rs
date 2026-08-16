@@ -263,6 +263,7 @@ fn set_i18n_globals(g: &I18n, lang: i18n::Lang) {
     g.set_menu_file(t(lang, "menu-file").into());
     g.set_menu_open(t(lang, "menu-open").into());
     g.set_menu_import_merge(t(lang, "menu-import-merge").into());
+    g.set_menu_save_as(t(lang, "menu-save-as").into());
     g.set_menu_save(t(lang, "menu-save").into());
     g.set_menu_settings(t(lang, "menu-settings").into());
     g.set_menu_help(t(lang, "menu-help").into());
@@ -674,6 +675,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let Some(ui) = ui_weak.upgrade() else { return };
             app.save_data_or_status(&ui, &app.data.borrow());
             let path = app.data_path();
+            ui.set_status_text(i18n::sub(i18n::t("status-saved"), &[("path", path.display().to_string())]).into());
+        });
+    }
+
+    // File > Save As: save the current data to a user-picked path, then switch
+    // the configured data directory to that file's folder (same effect as the
+    // settings window's "Save Location"), so subsequent saves and the exit
+    // save land there too.
+    {
+        let ui_weak = ui_weak.clone();
+        let app = app.clone();
+        let settings_cb = settings.clone();
+        ui.on_request_save_as(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let Some(path) = rfd::FileDialog::new()
+                .set_title(i18n::t("dlg-save-data").to_string())
+                .add_filter("JSON", &["json"])
+                .set_file_name("data.json")
+                .save_file()
+            else { return };
+            if let Err(e) = data::save(&app.data.borrow(), &path) {
+                ui.set_status_text(i18n::sub(i18n::t("status-save-error"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
+                eprintln!("Failed to save roadmap data to {}: {e}", path.display());
+                return;
+            }
+            // Switch the save location to the picked file's folder and persist
+            // the config, keeping the settings window's path in sync.
+            {
+                let mut c = app.config.borrow_mut();
+                if let Some(dir) = path.parent() {
+                    c.data_dir = Some(dir.display().to_string());
+                    app.save_config_or_status(&ui, &c);
+                }
+            }
+            settings_cb.set_data_dir_path(app.data_path().display().to_string().into());
             ui.set_status_text(i18n::sub(i18n::t("status-saved"), &[("path", path.display().to_string())]).into());
         });
     }

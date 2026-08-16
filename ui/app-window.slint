@@ -81,6 +81,7 @@ export component AppWindow inherits Window {
     callback request-open-file();
     callback request-import-file();
     callback request-save();
+    callback request-save-as();
 
     function timeline-x(day: int, width: length) -> length {
         return root.timeline-pad
@@ -97,6 +98,10 @@ export component AppWindow inherits Window {
             MenuItem {
                 title: I18n.menu-import-merge;
                 activated => { root.request-import-file(); }
+            }
+            MenuItem {
+                title: I18n.menu-save-as;
+                activated => { root.request-save-as(); }
             }
         }
         Menu {
