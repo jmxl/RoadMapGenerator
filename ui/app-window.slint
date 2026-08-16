@@ -78,6 +78,7 @@ export component AppWindow inherits Window {
     callback request-set-color(string);
     callback request-settings();
     callback request-about();
+    callback request-new-file();
     callback request-open-file();
     callback request-import-file();
     callback request-save();
@@ -94,6 +95,10 @@ export component AppWindow inherits Window {
             MenuItem {
                 title: I18n.menu-open;
                 activated => { root.request-open-file(); }
+            }
+            MenuItem {
+                title: I18n.menu-new;
+                activated => { root.request-new-file(); }
             }
             MenuItem {
                 title: I18n.menu-import-merge;

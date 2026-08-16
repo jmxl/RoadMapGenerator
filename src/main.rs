@@ -271,6 +271,7 @@ fn set_i18n_globals(g: &I18n, lang: i18n::Lang) {
     g.set_app_title(t(lang, "app-title").into());
     g.set_menu_file(t(lang, "menu-file").into());
     g.set_menu_open(t(lang, "menu-open").into());
+    g.set_menu_new(t(lang, "menu-new").into());
     g.set_menu_import_merge(t(lang, "menu-import-merge").into());
     g.set_menu_save_as(t(lang, "menu-save-as").into());
     g.set_menu_save(t(lang, "menu-save").into());
@@ -619,6 +620,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let Some(ui) = ui_weak.upgrade() else { return };
             let _ = about.show();
             center_on_parent(ui.window(), about.window());
+        });
+    }
+
+    // File > New: start a blank roadmap saved to a user-chosen location and file
+    // name. The save dialog comes first, so cancelling leaves the current data
+    // untouched; on confirmation the data is cleared, saved to the picked
+    // path, and that path becomes the current data file (Save / the exit save
+    // write back to it). The configured default location is not changed.
+    {
+        let ui_weak = ui_weak.clone();
+        let app = app.clone();
+        ui.on_request_new_file(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let Some(path) = rfd::FileDialog::new()
+                .set_title(i18n::t("dlg-new-data").to_string())
+                .add_filter("JSON", &["json"])
+                .set_file_name("data.json")
+                .save_file()
+            else { return };
+            *app.data.borrow_mut() = RoadmapData::default();
+            app.set_data_file(path.clone());
+            if let Err(e) = data::save(&app.data.borrow(), &path) {
+                ui.set_status_text(i18n::sub(i18n::t("status-save-error"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
+                eprintln!("Failed to save roadmap data to {}: {e}", path.display());
+                return;
+            }
+            refresh_ui(&ui, &app.data.borrow());
+            ui.set_status_text(i18n::sub(i18n::t("status-new"), &[("path", path.display().to_string())]).into());
         });
     }
 
