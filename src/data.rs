@@ -65,9 +65,9 @@ pub fn default_theme() -> String {
     "auto".into()
 }
 
-/// Default UI language (English).
+/// Default UI language (Chinese).
 pub fn default_language() -> String {
-    "en".into()
+    "zh".into()
 }
 
 /// Normalize an arbitrary theme string to one of "auto" / "light" / "dark".
@@ -78,10 +78,11 @@ pub fn normalize_theme(s: &str) -> String {
     }
 }
 
-/// Normalize an arbitrary language string to "en" / "zh".
+/// Normalize an arbitrary language string to "en" / "zh", falling back to
+/// the default language for anything else.
 pub fn normalize_language(s: &str) -> String {
     match s {
-        "zh" => "zh".to_string(),
+        "en" | "zh" => s.to_string(),
         _ => default_language(),
     }
 }
@@ -487,7 +488,7 @@ mod tests {
         let json = r##"{}"##;
         let config: ConfigData = serde_json::from_str(json).unwrap();
         assert_eq!(config.theme, "auto");
-        assert_eq!(config.language, "en");
+        assert_eq!(config.language, "zh");
     }
 
     #[test]
@@ -500,16 +501,16 @@ mod tests {
     }
 
     #[test]
-    fn normalize_language_maps_unknown_values_to_en() {
+    fn normalize_language_maps_unknown_values_to_zh() {
         assert_eq!(normalize_language("en"), "en");
         assert_eq!(normalize_language("zh"), "zh");
-        assert_eq!(normalize_language(""), "en");
-        assert_eq!(normalize_language("banana"), "en");
+        assert_eq!(normalize_language(""), "zh");
+        assert_eq!(normalize_language("banana"), "zh");
     }
 
     #[test]
-    fn default_language_is_english() {
-        assert_eq!(ConfigData::default().language, "en");
+    fn default_language_is_chinese() {
+        assert_eq!(ConfigData::default().language, "zh");
     }
 
     #[test]

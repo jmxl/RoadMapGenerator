@@ -16,13 +16,13 @@ pub enum Lang {
 }
 
 impl Lang {
-    /// Map a persisted language code to a `Lang`. Anything other than `"zh"`
-    /// falls back to English.
+    /// Map a persisted language code to a `Lang`. Only `"en"` maps to
+    /// English; anything else (including unknown values) falls back to the
+    /// default language, Chinese.
     pub fn from_code(s: &str) -> Lang {
-        if s == "zh" {
-            Lang::Zh
-        } else {
-            Lang::En
+        match s {
+            "en" => Lang::En,
+            _ => Lang::Zh,
         }
     }
 
@@ -43,8 +43,8 @@ impl Lang {
     }
 }
 
-/// Process-wide current language (0 = En, 1 = Zh).
-static CURRENT: AtomicU8 = AtomicU8::new(0);
+/// Process-wide current language (0 = En, 1 = Zh). Defaults to Chinese.
+static CURRENT: AtomicU8 = AtomicU8::new(1);
 
 /// Set the language used by `t()` / `t_list()`.
 pub fn set_current(lang: Lang) {
@@ -242,14 +242,16 @@ mod tests {
     fn codes_roundtrip() {
         assert_eq!(Lang::from_code("en"), Lang::En);
         assert_eq!(Lang::from_code("zh"), Lang::Zh);
-        assert_eq!(Lang::from_code(""), Lang::En);
-        assert_eq!(Lang::from_code("banana"), Lang::En);
+        assert_eq!(Lang::from_code(""), Lang::Zh);
+        assert_eq!(Lang::from_code("banana"), Lang::Zh);
         assert_eq!(Lang::En.code(), "en");
         assert_eq!(Lang::Zh.code(), "zh");
     }
 
     #[test]
-    fn current_defaults_to_english() {
+    fn current_defaults_to_chinese() {
+        // The process-wide default language is Chinese.
+        assert_eq!(t("btn-add-milestone"), "添加里程碑");
         set_current(Lang::En);
         assert_eq!(t("btn-add-milestone"), "Add Milestone");
         set_current(Lang::Zh);
