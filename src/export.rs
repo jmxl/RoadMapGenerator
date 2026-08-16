@@ -221,7 +221,7 @@ mod tests {
         RoadmapData {
             projects: vec![
                 ProjectData {
-                    name: "SPN".into(),
+                    name: "STN".into(),
                     milestones: vec![
                         MilestoneData { name: "TR1".into(), date: NaiveDate::from_ymd_opt(2026, 8, 20).unwrap(), color: "#2563eb".into() },
                         MilestoneData { name: "TR4A".into(), date: NaiveDate::from_ymd_opt(2026, 9, 25).unwrap(), color: "#dc2626".into() },
@@ -243,7 +243,7 @@ mod tests {
     fn svg_contains_expected_markup() {
         let svg = build_svg(&sample()).expect("svg");
         assert!(svg.starts_with("<svg"));
-        assert!(svg.contains(">SPN</text>"));
+        assert!(svg.contains(">STN</text>"));
         assert!(svg.contains(">TR1</text>"));
         assert!(svg.contains(">TR4A</text>"));
         assert!(svg.contains(">2026/08/20</text>"));

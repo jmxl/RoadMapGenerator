@@ -95,16 +95,22 @@ pub fn normalize_language(s: &str) -> String {
 /// Load the roadmap from `path`. Returns an empty dataset if the file
 /// does not exist or cannot be parsed (the error is logged to stderr).
 pub fn load(path: &Path) -> RoadmapData {
-    match std::fs::read_to_string(path) {
-        Ok(text) => match serde_json::from_str(&text) {
-            Ok(data) => data,
-            Err(e) => {
-                eprintln!("Failed to parse {}: {e}", path.display());
-                RoadmapData::default()
-            }
-        },
-        Err(_) => RoadmapData::default(),
+    match load_result(path) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("{e}");
+            RoadmapData::default()
+        }
     }
+}
+
+/// Load the roadmap from `path`, reporting read/parse failures as `Err`
+/// instead of silently falling back to an empty dataset. Used by File > Open /
+/// Import, where the user picked the file and must be told when it is invalid.
+pub fn load_result(path: &Path) -> Result<RoadmapData, String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("Failed to parse {}: {e}", path.display()))
 }
 
 /// Persist the roadmap to `path` as pretty JSON, creating the parent
@@ -224,6 +230,31 @@ pub fn add_project(data: &mut RoadmapData, project: &str) -> Result<(), String> 
     }
     data.projects.push(ProjectData { name: pname.to_string(), milestones: Vec::new() });
     Ok(())
+}
+
+/// Merge `imported` into `target` in place, matching projects and milestones
+/// by name (case-insensitive, consistent with the rest of the app). A project
+/// from `imported` whose name already exists in `target` only contributes the
+/// milestones whose names are not already present; new projects are appended
+/// whole. Returns the number of projects added to `target`.
+pub fn merge_projects(target: &mut RoadmapData, imported: &RoadmapData) -> usize {
+    let mut added = 0;
+    for p in &imported.projects {
+        match target.projects.iter_mut().find(|t| t.name.eq_ignore_ascii_case(&p.name)) {
+            Some(t) => {
+                for m in &p.milestones {
+                    if !t.milestones.iter().any(|tm| tm.name.eq_ignore_ascii_case(&m.name)) {
+                        t.milestones.push(m.clone());
+                    }
+                }
+            }
+            None => {
+                target.projects.push(p.clone());
+                added += 1;
+            }
+        }
+    }
+    added
 }
 
 /// Recolor every milestone whose name matches `ms_name` (case-insensitive)
@@ -352,18 +383,18 @@ mod tests {
     #[test]
     fn add_milestone_creates_and_reuses_project() {
         let mut data = RoadmapData::default();
-        add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
-        add_milestone(&mut data, "spn", "TR4A", "2026/09/25", "#dc2626").unwrap();
+        add_milestone(&mut data, "STN", "TR1", "2026/08/20", "#2563eb").unwrap();
+        add_milestone(&mut data, "stn", "TR4A", "2026/09/25", "#dc2626").unwrap();
         assert_eq!(data.projects.len(), 1);
         assert_eq!(data.projects[0].milestones.len(), 2);
         assert_eq!(data.projects[0].milestones[1].color, "#DC2626");
 
         // duplicate milestone rejected
-        assert!(add_milestone(&mut data, "SPN", "tr1", "2026/10/01", "#2563eb").is_err());
+        assert!(add_milestone(&mut data, "STN", "tr1", "2026/10/01", "#2563eb").is_err());
         // invalid date rejected
-        assert!(add_milestone(&mut data, "SPN", "TR9", "bad", "#2563eb").is_err());
+        assert!(add_milestone(&mut data, "STN", "TR9", "bad", "#2563eb").is_err());
         // invalid color rejected
-        assert!(add_milestone(&mut data, "SPN", "TR9", "2026/10/01", "notacolor").is_err());
+        assert!(add_milestone(&mut data, "STN", "TR9", "2026/10/01", "notacolor").is_err());
         // blank fields rejected
         assert!(add_milestone(&mut data, "  ", "TR9", "2026/10/01", "#2563eb").is_err());
     }
@@ -392,15 +423,15 @@ mod tests {
     #[test]
     fn add_project_rejects_duplicates() {
         let mut data = RoadmapData::default();
-        add_project(&mut data, "SPN").unwrap();
-        assert!(add_project(&mut data, "spn").is_err());
+        add_project(&mut data, "STN").unwrap();
+        assert!(add_project(&mut data, "stn").is_err());
     }
 
     #[test]
     fn recolor_milestone_matches_by_name_case_insensitively() {
         let mut data = RoadmapData::default();
-        add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
-        add_milestone(&mut data, "SPN", "TR2", "2026/09/01", "#2563eb").unwrap();
+        add_milestone(&mut data, "STN", "TR1", "2026/08/20", "#2563eb").unwrap();
+        add_milestone(&mut data, "STN", "TR2", "2026/09/01", "#2563eb").unwrap();
 
         assert!(recolor_milestone(&mut data, 0, "tr1", "#FF0000"));
         assert_eq!(data.projects[0].milestones[0].color, "#FF0000");
@@ -416,8 +447,8 @@ mod tests {
     #[test]
     fn recolor_project_recolors_all_milestones() {
         let mut data = RoadmapData::default();
-        add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
-        add_milestone(&mut data, "SPN", "TR2", "2026/09/01", "#2563eb").unwrap();
+        add_milestone(&mut data, "STN", "TR1", "2026/08/20", "#2563eb").unwrap();
+        add_milestone(&mut data, "STN", "TR2", "2026/09/01", "#2563eb").unwrap();
 
         assert!(recolor_project(&mut data, 0, "#FF0000"));
         assert!(data.projects[0].milestones.iter().all(|m| m.color == "#FF0000"));
@@ -428,8 +459,8 @@ mod tests {
     #[test]
     fn remove_milestone_matches_by_name_case_insensitively() {
         let mut data = RoadmapData::default();
-        add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
-        add_milestone(&mut data, "SPN", "TR2", "2026/09/01", "#2563eb").unwrap();
+        add_milestone(&mut data, "STN", "TR1", "2026/08/20", "#2563eb").unwrap();
+        add_milestone(&mut data, "STN", "TR2", "2026/09/01", "#2563eb").unwrap();
 
         assert_eq!(remove_milestone(&mut data, 0, "tr2"), Some("TR2".into()));
         assert_eq!(data.projects[0].milestones.len(), 1);
@@ -443,12 +474,12 @@ mod tests {
     #[test]
     fn remove_project_removes_by_index() {
         let mut data = RoadmapData::default();
-        add_project(&mut data, "SPN").unwrap();
-        add_project(&mut data, "TRN").unwrap();
+        add_project(&mut data, "STN").unwrap();
+        add_project(&mut data, "TRA").unwrap();
 
-        assert_eq!(remove_project(&mut data, 1), Some("TRN".into()));
+        assert_eq!(remove_project(&mut data, 1), Some("TRA".into()));
         assert_eq!(data.projects.len(), 1);
-        assert_eq!(data.projects[0].name, "SPN");
+        assert_eq!(data.projects[0].name, "STN");
         assert_eq!(remove_project(&mut data, 9), None);
     }
 
@@ -456,7 +487,7 @@ mod tests {
     fn save_load_roundtrip() {
         let path = std::env::temp_dir().join(format!("roadmap_test_{}.json", std::process::id()));
         let mut data = RoadmapData::default();
-        add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
+        add_milestone(&mut data, "STN", "TR1", "2026/08/20", "#2563eb").unwrap();
         save(&data, &path).unwrap();
         let loaded = load(&path);
         assert_eq!(loaded.projects.len(), 1);
@@ -465,13 +496,52 @@ mod tests {
     }
 
     #[test]
+    fn load_result_reports_missing_and_invalid_files() {
+        let missing = std::env::temp_dir().join(format!("roadmap_missing_{}.json", std::process::id()));
+        assert!(load_result(&missing).is_err());
+        let _ = std::fs::remove_file(&missing);
+
+        let invalid = std::env::temp_dir().join(format!("roadmap_invalid_{}.json", std::process::id()));
+        std::fs::write(&invalid, "not json").unwrap();
+        assert!(load_result(&invalid).is_err());
+        let _ = std::fs::remove_file(&invalid);
+    }
+
+    #[test]
+    fn merge_projects_adds_new_and_merges_existing() {
+        let mut target = RoadmapData::default();
+        add_milestone(&mut target, "STN", "TR1", "2026/08/20", "#2563eb").unwrap();
+        add_project(&mut target, "TRA").unwrap();
+
+        let mut imported = RoadmapData::default();
+        // New project -> appended whole.
+        add_milestone(&mut imported, "NEW", "N1", "2026/10/01", "#dc2626").unwrap();
+        // Existing project (case-insensitive match) -> only new milestones;
+        // "TR1" already exists in the *target*, so it must not be duplicated.
+        add_milestone(&mut imported, "stn", "TR2", "2026/09/01", "#16a34a").unwrap();
+        add_milestone(&mut imported, "STN", "TR1", "2026/11/01", "#7c3aed").unwrap();
+        // Existing empty project -> gets milestones.
+        add_milestone(&mut imported, "tra", "M1", "2026/12/01", "#0d9488").unwrap();
+
+        let added = merge_projects(&mut target, &imported);
+        assert_eq!(added, 1);
+        assert_eq!(target.projects.len(), 3);
+        assert_eq!(target.projects[0].name, "STN");
+        assert_eq!(target.projects[0].milestones.len(), 2); // TR1 + TR2, no dup
+        assert_eq!(target.projects[0].milestones[1].name, "TR2");
+        assert_eq!(target.projects[1].name, "TRA");
+        assert_eq!(target.projects[1].milestones.len(), 1);
+        assert_eq!(target.projects[2].name, "NEW");
+    }
+
+    #[test]
     fn legacy_combined_json_still_loads_projects() {
         // JSON written before the data/settings split (projects + settings in
         // one file) must still load; serde ignores the unknown settings keys.
-        let json = r##"{"projects":[{"name":"SPN","milestones":[{"name":"TR1","date":"2026-08-20","color":"#2563EB"}]}],"theme":"light","language":"zh"}"##;
+        let json = r##"{"projects":[{"name":"STN","milestones":[{"name":"TR1","date":"2026-08-20","color":"#2563EB"}]}],"theme":"light","language":"zh"}"##;
         let data: RoadmapData = serde_json::from_str(json).unwrap();
         assert_eq!(data.projects.len(), 1);
-        assert_eq!(data.projects[0].name, "SPN");
+        assert_eq!(data.projects[0].name, "STN");
     }
 
     #[test]

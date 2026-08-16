@@ -78,6 +78,9 @@ export component AppWindow inherits Window {
     callback request-set-color(string);
     callback request-settings();
     callback request-about();
+    callback request-open-file();
+    callback request-import-file();
+    callback request-save();
 
     function timeline-x(day: int, width: length) -> length {
         return root.timeline-pad
@@ -85,6 +88,24 @@ export component AppWindow inherits Window {
     }
 
     MenuBar {
+        Menu {
+            title: I18n.menu-file;
+            MenuItem {
+                title: I18n.menu-open;
+                activated => { root.request-open-file(); }
+            }
+            MenuItem {
+                title: I18n.menu-import-merge;
+                activated => { root.request-import-file(); }
+            }
+        }
+        Menu {
+            title: I18n.menu-save;
+            MenuItem {
+                title: I18n.menu-save;
+                activated => { root.request-save(); }
+            }
+        }
         Menu {
             title: I18n.menu-settings;
             MenuItem {

@@ -74,6 +74,14 @@ pub fn t_in(lang: Lang, key: &str) -> &'static str {
         // ---- main window ----
         (Lang::En, "app-title") => concat!("Roadmap Generator - ", env!("CARGO_PKG_VERSION")),
         (Lang::Zh, "app-title") => concat!("路线图生成器 - ", env!("CARGO_PKG_VERSION")),
+        (Lang::En, "menu-file") => "File",
+        (Lang::Zh, "menu-file") => "文件",
+        (Lang::En, "menu-open") => "Open",
+        (Lang::Zh, "menu-open") => "打开",
+        (Lang::En, "menu-import-merge") => "Import (Merge)",
+        (Lang::Zh, "menu-import-merge") => "导入(合并)",
+        (Lang::En, "menu-save") => "Save",
+        (Lang::Zh, "menu-save") => "保存",
         (Lang::En, "menu-settings") => "Settings",
         (Lang::Zh, "menu-settings") => "设置",
         (Lang::En, "menu-help") => "Help",
@@ -174,6 +182,18 @@ pub fn t_in(lang: Lang, key: &str) -> &'static str {
         (Lang::Zh, "status-data-dir-changed") => "路线图数据将保存到 {path}",
         (Lang::En, "status-data-dir-reset") => "Roadmap data directory reset to default: {path}",
         (Lang::Zh, "status-data-dir-reset") => "路线图数据目录已恢复默认：{path}",
+        (Lang::En, "status-saved") => "Data saved to {path}",
+        (Lang::Zh, "status-saved") => "数据已保存到 {path}",
+        (Lang::En, "status-opened") => "Opened {n} projects from {path}",
+        (Lang::Zh, "status-opened") => "已从 {path} 打开 {n} 个项目",
+        (Lang::En, "status-imported") => "Imported {n} projects from {path}",
+        (Lang::Zh, "status-imported") => "已从 {path} 导入 {n} 个项目",
+        (Lang::En, "dlg-open-data") => "Open data file",
+        (Lang::Zh, "dlg-open-data") => "打开数据文件",
+        (Lang::En, "dlg-import-data") => "Import data file",
+        (Lang::Zh, "dlg-import-data") => "导入数据文件",
+        (Lang::En, "err-load") => "Failed to load {path}: {error}",
+        (Lang::Zh, "err-load") => "加载 {path} 失败：{error}",
         (Lang::En, "dlg-pick-data-dir") => "Choose data folder",
         (Lang::Zh, "dlg-pick-data-dir") => "选择数据文件夹",
         (Lang::En, "status-save-error") => "Failed to save to {path}: {error}",
@@ -285,8 +305,8 @@ mod tests {
             "Loaded 3 project(s) from x.json"
         );
         assert_eq!(
-            sub(t_in(Lang::Zh, "status-added"), &[("milestone", "TR1".into()), ("date", "2026/08/20".into()), ("project", "SPN".into())]),
-            "已向 \"SPN\" 添加里程碑 \"TR1\"（2026/08/20）"
+            sub(t_in(Lang::Zh, "status-added"), &[("milestone", "TR1".into()), ("date", "2026/08/20".into()), ("project", "STN".into())]),
+            "已向 \"STN\" 添加里程碑 \"TR1\"（2026/08/20）"
         );
     }
 

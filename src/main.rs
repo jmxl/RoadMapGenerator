@@ -260,6 +260,10 @@ fn apply_language(ui: &AppWindow, settings: &SettingsWindow, about: &AboutDialog
 fn set_i18n_globals(g: &I18n, lang: i18n::Lang) {
     use i18n::t_in as t;
     g.set_app_title(t(lang, "app-title").into());
+    g.set_menu_file(t(lang, "menu-file").into());
+    g.set_menu_open(t(lang, "menu-open").into());
+    g.set_menu_import_merge(t(lang, "menu-import-merge").into());
+    g.set_menu_save(t(lang, "menu-save").into());
     g.set_menu_settings(t(lang, "menu-settings").into());
     g.set_menu_help(t(lang, "menu-help").into());
     g.set_menu_about(t(lang, "menu-about").into());
@@ -604,6 +608,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let Some(ui) = ui_weak.upgrade() else { return };
             let _ = about.show();
             center_on_parent(ui.window(), about.window());
+        });
+    }
+
+    // File > Open: replace the current data with a picked data.json. The file is
+    // loaded in memory only; nothing is persisted until File > Save (or exit).
+    {
+        let ui_weak = ui_weak.clone();
+        let app = app.clone();
+        ui.on_request_open_file(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let Some(path) = rfd::FileDialog::new()
+                .set_title(i18n::t("dlg-open-data").to_string())
+                .add_filter("JSON", &["json"])
+                .pick_file()
+            else { return };
+            match data::load_result(&path) {
+                Ok(loaded) => {
+                    let n = loaded.projects.len();
+                    *app.data.borrow_mut() = loaded;
+                    refresh_ui(&ui, &app.data.borrow());
+                    ui.set_status_text(i18n::sub(i18n::t("status-opened"), &[("n", n.to_string()), ("path", path.display().to_string())]).into());
+                }
+                Err(e) => {
+                    ui.set_status_text(i18n::sub(i18n::t("err-load"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
+                    eprintln!("Failed to open {}: {e}", path.display());
+                }
+            }
+        });
+    }
+
+    // File > Import (Merge): merge a picked data.json into the current data.
+    // Projects are matched by name (case-insensitive); existing projects only
+    // gain milestones that are not already present.
+    {
+        let ui_weak = ui_weak.clone();
+        let app = app.clone();
+        ui.on_request_import_file(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let Some(path) = rfd::FileDialog::new()
+                .set_title(i18n::t("dlg-import-data").to_string())
+                .add_filter("JSON", &["json"])
+                .pick_file()
+            else { return };
+            match data::load_result(&path) {
+                Ok(imported) => {
+                    let added = data::merge_projects(&mut app.data.borrow_mut(), &imported);
+                    refresh_ui(&ui, &app.data.borrow());
+                    ui.set_status_text(i18n::sub(i18n::t("status-imported"), &[("n", added.to_string()), ("path", path.display().to_string())]).into());
+                }
+                Err(e) => {
+                    ui.set_status_text(i18n::sub(i18n::t("err-load"), &[("path", path.display().to_string()), ("error", e.clone())]).into());
+                    eprintln!("Failed to import {}: {e}", path.display());
+                }
+            }
+        });
+    }
+
+    // File > Save: persist the current data immediately to the configured
+    // location (the same save that otherwise runs after every mutation).
+    {
+        let ui_weak = ui_weak.clone();
+        let app = app.clone();
+        ui.on_request_save(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            app.save_data_or_status(&ui, &app.data.borrow());
+            let path = app.data_path();
+            ui.set_status_text(i18n::sub(i18n::t("status-saved"), &[("path", path.display().to_string())]).into());
         });
     }
 
