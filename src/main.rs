@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use data::{day_number, format_date, normalize_theme, RoadmapData};
-use slint::{ModelRc, VecModel};
+use slint::{ComponentHandle, ModelRc, VecModel};
 use slint::private_unstable_api::re_exports::ColorScheme;
 
 slint::include_modules!();
@@ -130,6 +130,18 @@ fn refresh_ui(ui: &AppWindow, data: &RoadmapData) {
     ui.set_name_column_width((max_name_w + 24.0).max(120.0));
     ui.set_selected_project(-1);
     ui.set_selected_milestone(-1);
+}
+
+/// Center `child` on top of `parent` (physical pixels). Called right before
+/// showing a secondary window so it opens in the middle of the main window.
+fn center_on_parent(parent: &slint::Window, child: &slint::Window) {
+    let p_pos = parent.position();
+    let p_size = parent.size();
+    let c_size = child.size();
+    child.set_position(slint::PhysicalPosition::new(
+        p_pos.x + (p_size.width as i32 - c_size.width as i32) / 2,
+        p_pos.y + (p_size.height as i32 - c_size.height as i32) / 2,
+    ));
 }
 
 /// Force the color scheme of both windows via the widget style's `Palette`
@@ -440,10 +452,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // Show the settings window (like the About dialog).
+    // Show the settings window, centered on the main window.
     {
+        let ui_weak = ui_weak.clone();
         let settings = settings.clone();
         ui.on_request_settings(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            center_on_parent(ui.window(), settings.window());
             let _ = settings.show();
         });
     }
@@ -497,10 +512,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // About dialog.
+    // About dialog, centered on the main window.
     {
+        let ui_weak = ui_weak.clone();
         let about = about.clone();
         ui.on_request_about(move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            center_on_parent(ui.window(), about.window());
             let _ = about.show();
         });
     }
