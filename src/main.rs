@@ -56,6 +56,21 @@ fn data_path(config: &ConfigData) -> PathBuf {
     }
 }
 
+/// The data file to open at startup: the one that was open when the app last
+/// exited (if it still exists and parses), else the `data.json` under the
+/// configured data directory. A remembered file that no longer parses is
+/// deliberately skipped, so the exit save never overwrites a broken file with
+/// the startup defaults.
+fn initial_data_file(config: &ConfigData) -> PathBuf {
+    let fallback = data_path(config);
+    let Some(f) = &config.current_file else { return fallback };
+    let p = PathBuf::from(f);
+    if !p.is_file() || data::load_result(&p).is_err() {
+        return fallback;
+    }
+    p
+}
+
 /// App settings (theme, language, data location) live in
 /// `~/.RoadMapGenerator/config.json`.
 fn config_path() -> PathBuf {
@@ -316,7 +331,7 @@ fn set_i18n_globals(g: &I18n, lang: i18n::Lang) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = data::load_config(&config_path());
-    let data_file = data_path(&config);
+    let data_file = initial_data_file(&config);
     let app = Rc::new(AppContext {
         data: RefCell::new(data::load(&data_file)),
         config: RefCell::new(config),
@@ -811,6 +826,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let run_result = ui.run();
 
     // Auto-save on exit (both files are also saved after every change).
+    {
+        // Remember the current data file so the next launch opens it again.
+        let mut c = app.config.borrow_mut();
+        c.current_file = Some(app.data_path().display().to_string());
+    }
     if let Err(e) = data::save(&app.data.borrow(), &app.data_path()) {
         eprintln!("Failed to save roadmap data: {e}");
     }

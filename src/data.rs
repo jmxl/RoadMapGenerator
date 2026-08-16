@@ -53,6 +53,11 @@ pub struct ConfigData {
     /// `~/Documents/RoadMaps` location.
     #[serde(default)]
     pub data_dir: Option<String>,
+    /// The data file that was open when the app last exited, so the next
+    /// launch can open it again. `None` = fall back to the configured
+    /// data directory.
+    #[serde(default)]
+    pub current_file: Option<String>,
 }
 
 impl Default for ConfigData {
@@ -61,6 +66,7 @@ impl Default for ConfigData {
             theme: default_theme(),
             language: default_language(),
             data_dir: None,
+            current_file: None,
         }
     }
 }
@@ -551,23 +557,26 @@ mod tests {
         config.theme = "dark".into();
         config.language = "zh".into();
         config.data_dir = Some("/data".into());
+        config.current_file = Some("/data/custom.json".into());
         save_config(&config, &path).unwrap();
         let loaded = load_config(&path);
         assert_eq!(loaded.theme, "dark");
         assert_eq!(loaded.language, "zh");
         assert_eq!(loaded.data_dir, Some("/data".into()));
+        assert_eq!(loaded.current_file, Some("/data/custom.json".into()));
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn config_with_missing_fields_defaults() {
-        // JSON written before the theme/language/data_dir fields existed must
-        // still load.
+        // JSON written before the theme/language/data_dir/current_file fields
+        // existed must still load.
         let json = r##"{}"##;
         let config: ConfigData = serde_json::from_str(json).unwrap();
         assert_eq!(config.theme, "auto");
         assert_eq!(config.language, "zh");
         assert_eq!(config.data_dir, None);
+        assert_eq!(config.current_file, None);
     }
 
     #[test]
