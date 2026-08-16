@@ -85,6 +85,7 @@ export component AppWindow inherits Window {
             title: @tr("Settings");
             MenuItem {
                 title: @tr("Settings");
+                icon: @image-url("icon/settings.png");
                 activated => { root.request-settings(); }
             }
         }
@@ -92,6 +93,7 @@ export component AppWindow inherits Window {
             title: @tr("Help");
             MenuItem {
                 title: @tr("About");
+                icon: @image-url("icon/about.png");
                 activated => { root.request-about(); }
             }
         }
