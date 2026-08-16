@@ -3,6 +3,23 @@
 version = 4
 
 [[package]]
+name = "RoadMapGenerator"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "embed-resource",
+ "png",
+ "resvg 0.48.1",
+ "rfd",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "tiny-skia 0.12.0",
+ "usvg 0.48.1",
+]
+
+[[package]]
 name = "ab_glyph"
 version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4124,23 +4141,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
 dependencies = [
  "bytemuck",
-]
-
-[[package]]
-name = "roadmap"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "embed-resource",
- "png",
- "resvg 0.48.1",
- "rfd",
- "serde",
- "serde_json",
- "slint",
- "slint-build",
- "tiny-skia 0.12.0",
- "usvg 0.48.1",
 ]
 
 [[package]]

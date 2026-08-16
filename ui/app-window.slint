@@ -1,7 +1,11 @@
-import { Button, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, ScrollView, StyleMetrics } from "std-widgets.slint";
 import { AboutDialog } from "about-dialog.slint";
-// Re-export so the Slint compiler generates a Rust type for the dialog.
+import { SettingsWindow } from "settings-window.slint";
+// Re-export so the Slint compiler generates Rust types for the dialogs and the
+// Palette global (used to force the dark/light color scheme from Rust).
 export { AboutDialog } from "about-dialog.slint";
+export { SettingsWindow } from "settings-window.slint";
+export { Palette } from "std-widgets.slint";
 
 struct Milestone {
     name: string,
@@ -37,6 +41,10 @@ export component AppWindow inherits Window {
     in-out property <length> name-column-width: 150px;
     in-out property <int> color-preset-index: 0;
     in-out property <color> preview-color: #2563eb;
+    // True when the effective color scheme is dark. Derived from the widget
+    // style's actual window background so it stays correct in all three modes
+    // (auto follows the OS and updates live).
+    property <bool> dark: StyleMetrics.window-background.to-oklch().lightness < 0.5;
     property <[string]> preset-colors: [
         "#2563EB", "#DC2626", "#16A34A", "#EA580C", "#7C3AED",
         "#0D9488", "#64748B", "#B91C1C", "#111827",
@@ -64,6 +72,7 @@ export component AppWindow inherits Window {
     callback request-export-svg();
     callback request-export-png();
     callback request-set-color(string);
+    callback request-settings();
     callback request-about();
 
     function timeline-x(day: int, width: length) -> length {
@@ -72,6 +81,13 @@ export component AppWindow inherits Window {
     }
 
     MenuBar {
+        Menu {
+            title: @tr("Settings");
+            MenuItem {
+                title: @tr("Settings");
+                activated => { root.request-settings(); }
+            }
+        }
         Menu {
             title: @tr("Help");
             MenuItem {
@@ -87,7 +103,7 @@ export component AppWindow inherits Window {
 
         // ---- input panel ----
         Rectangle {
-            background: #f2f6fc;
+            background: root.dark ? #232a35 : #f2f6fc;
             border-radius: 10px;
             VerticalLayout {
                 padding: 12px;
@@ -126,7 +142,7 @@ export component AppWindow inherits Window {
                         text: "Color:";
                         vertical-alignment: center;
                         font-size: 13px;
-                        color: #334155;
+                        color: root.dark ? #cbd5e1 : #334155;
                     }
                     ComboBox {
                         model: ["Blue", "Red", "Green", "Orange", "Purple", "Teal", "Gray", "Crimson", "Black"];
@@ -141,7 +157,7 @@ export component AppWindow inherits Window {
                         height: 26px;
                         border-radius: 6px;
                         border-width: 1px;
-                        border-color: #cbd5e1;
+                        border-color: root.dark ? #4b5563 : #cbd5e1;
                         background: root.preview-color;
                     }
                     Rectangle { horizontal-stretch: 1; }
@@ -186,7 +202,7 @@ export component AppWindow inherits Window {
         Rectangle {
             border-radius: 10px;
             border-width: 1px;
-            border-color: #dde5ee;
+            border-color: root.dark ? #3b4453 : #dde5ee;
             clip: true;
             vertical-stretch: 1;
 
@@ -200,7 +216,7 @@ export component AppWindow inherits Window {
 
                     Rectangle {
                         height: 1px;
-                        background: #e2e8f0;
+                        background: root.dark ? #2f3744 : #e2e8f0;
                     }
 
                     // "We are here" marker row (hidden when today is outside the visible range)
@@ -244,7 +260,7 @@ export component AppWindow inherits Window {
                                 alignment: center;
                                 Text {
                                     text: "No projects yet - add one above.";
-                                    color: #94a3b8;
+                                    color: root.dark ? #8b98ab : #94a3b8;
                                     font-size: 14px;
                                 }
                             }
@@ -254,7 +270,9 @@ export component AppWindow inherits Window {
                     // project rows
                     for project[pidx] in root.projects: Rectangle {
                         height: 64px;
-                        background: root.selected-project == pidx ? #e2ecff : (Math.mod(pidx, 2) == 0 ? #ffffff : #f7fafd);
+                        background: root.dark
+                            ? (root.selected-project == pidx ? #1e3a5f : (Math.mod(pidx, 2) == 0 ? #1e2430 : #191e26))
+                            : (root.selected-project == pidx ? #e2ecff : (Math.mod(pidx, 2) == 0 ? #ffffff : #f7fafd));
 
                         HorizontalLayout {
                             spacing: 0px;
@@ -271,13 +289,13 @@ export component AppWindow inherits Window {
                                         text: project.name;
                                         font-size: 14px;
                                         font-weight: 700;
-                                        color: #0f172a;
+                                        color: root.dark ? #e2e8f0 : #0f172a;
                                         overflow: elide;
                                     }
                                     Text {
                                         text: "\{project.milestones.length} milestone(s)";
                                         font-size: 11px;
-                                        color: #94a3b8;
+                                        color: root.dark ? #8b98ab : #94a3b8;
                                     }
                                 }
                                 TouchArea {
@@ -305,7 +323,7 @@ export component AppWindow inherits Window {
                                     y: parent.height / 2 - 1px;
                                     width: parent.width;
                                     height: 2px;
-                                    background: #d3dce6;
+                                    background: root.dark ? #334155 : #d3dce6;
                                 }
 
                                 // "We are here" dashed line segment (today marker)
@@ -324,7 +342,7 @@ export component AppWindow inherits Window {
                                     x: root.timeline-x(ms.day, timeline-cell.width) - 45px;
                                     width: 90px;
                                     height: 100%;
-                                    background: root.selected-project == pidx && root.selected-milestone == msidx ? #d9e6ff : transparent;
+                                    background: root.selected-project == pidx && root.selected-milestone == msidx ? (root.dark ? #1e3a5f : #d9e6ff) : transparent;
                                     border-radius: 8px;
 
                                     VerticalLayout {
@@ -353,7 +371,7 @@ export component AppWindow inherits Window {
                                         Text {
                                             text: ms.date-text;
                                             font-size: 10px;
-                                            color: #64748b;
+                                            color: root.dark ? #8b98ab : #64748b;
                                             horizontal-alignment: center;
                                         }
                                     }
@@ -382,7 +400,7 @@ export component AppWindow inherits Window {
         // status bar
         Text {
             text: root.status-text;
-            color: #64748b;
+            color: root.dark ? #8b98ab : #64748b;
             font-size: 12px;
         }
     }

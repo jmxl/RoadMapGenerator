@@ -27,6 +27,22 @@ pub struct ProjectData {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RoadmapData {
     pub projects: Vec<ProjectData>,
+    /// UI theme preference: "auto" (follow system), "light" or "dark".
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+/// Default UI theme (follow the system color scheme).
+pub fn default_theme() -> String {
+    "auto".into()
+}
+
+/// Normalize an arbitrary theme string to one of "auto" / "light" / "dark".
+pub fn normalize_theme(s: &str) -> String {
+    match s {
+        "light" | "dark" => s.to_string(),
+        _ => default_theme(),
+    }
 }
 
 /// Load the roadmap from `path`. Returns an empty dataset if the file
@@ -230,11 +246,30 @@ mod tests {
     fn save_load_roundtrip() {
         let path = std::env::temp_dir().join(format!("roadmap_test_{}.json", std::process::id()));
         let mut data = RoadmapData::default();
+        data.theme = "dark".into();
         add_milestone(&mut data, "SPN", "TR1", "2026/08/20", "#2563eb").unwrap();
         save(&data, &path).unwrap();
         let loaded = load(&path);
         assert_eq!(loaded.projects.len(), 1);
         assert_eq!(loaded.projects[0].milestones[0].date, date(2026, 8, 20));
+        assert_eq!(loaded.theme, "dark");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn old_json_without_theme_defaults_to_auto() {
+        // JSON written before the theme field existed must still load.
+        let json = r##"{"projects":[{"name":"SPN","milestones":[{"name":"TR1","date":"2026-08-20","color":"#2563EB"}]}]}"##;
+        let data: RoadmapData = serde_json::from_str(json).unwrap();
+        assert_eq!(data.theme, "auto");
+        assert_eq!(data.projects.len(), 1);
+    }
+
+    #[test]
+    fn normalize_theme_maps_unknown_values_to_auto() {
+        assert_eq!(normalize_theme("light"), "light");
+        assert_eq!(normalize_theme("dark"), "dark");
+        assert_eq!(normalize_theme(""), "auto");
+        assert_eq!(normalize_theme("banana"), "auto");
     }
 }

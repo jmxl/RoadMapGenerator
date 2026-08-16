@@ -212,6 +212,7 @@ mod tests {
 
     fn sample() -> RoadmapData {
         RoadmapData {
+            theme: "auto".into(),
             projects: vec![
                 ProjectData {
                     name: "SPN".into(),
@@ -246,13 +247,14 @@ mod tests {
     #[test]
     fn svg_rejects_empty_data() {
         assert!(build_svg(&RoadmapData::default()).is_err());
-        let no_ms = RoadmapData { projects: vec![ProjectData { name: "X".into(), milestones: vec![] }] };
+        let no_ms = RoadmapData { theme: "auto".into(), projects: vec![ProjectData { name: "X".into(), milestones: vec![] }] };
         assert!(build_svg(&no_ms).is_err());
     }
 
     #[test]
     fn svg_escapes_markup() {
         let data = RoadmapData {
+            theme: "auto".into(),
             projects: vec![ProjectData {
                 name: "<A&B>".into(),
                 milestones: vec![MilestoneData {

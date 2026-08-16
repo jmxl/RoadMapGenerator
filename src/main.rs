@@ -8,8 +8,9 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use data::{day_number, format_date, RoadmapData};
+use data::{day_number, format_date, normalize_theme, RoadmapData};
 use slint::{ModelRc, VecModel};
+use slint::private_unstable_api::re_exports::ColorScheme;
 
 slint::include_modules!();
 
@@ -106,12 +107,31 @@ fn refresh_ui(ui: &AppWindow, data: &RoadmapData) {
     ui.set_selected_milestone(-1);
 }
 
+/// Force the color scheme of both windows via the widget style's `Palette`
+/// global. `ColorScheme::Unknown` restores "follow the system" (the widget
+/// styles fall back to the OS scheme in that case).
+fn apply_theme(ui: &AppWindow, settings: &SettingsWindow, theme: &str) {
+    let scheme = match theme {
+        "light" => ColorScheme::Light,
+        "dark" => ColorScheme::Dark,
+        _ => ColorScheme::Unknown,
+    };
+    ui.global::<Palette>().set_color_scheme(scheme);
+    settings.global::<Palette>().set_color_scheme(scheme);
+    settings.set_theme(theme.into());
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = data_path();
     let data = Rc::new(RefCell::new(data::load(&path)));
 
     let ui = AppWindow::new()?;
     refresh_ui(&ui, &data.borrow());
+
+    // Settings window (theme picker). Created before any callback wiring so the
+    // initial theme can be applied to both windows up front.
+    let settings = Rc::new(SettingsWindow::new()?);
+    apply_theme(&ui, &settings, data.borrow().theme.as_str());
 
     {
         let n = data.borrow().projects.len();
@@ -325,6 +345,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(msg) => ui.set_status_text(msg.into()),
                 Err(e) => ui.set_status_text(e.into()),
             }
+        });
+    }
+
+    // Show the settings window (like the About dialog).
+    {
+        let settings = settings.clone();
+        ui.on_request_settings(move || {
+            let _ = settings.show();
+        });
+    }
+
+    // Theme changes from the settings window: persist, then apply to both windows.
+    {
+        let ui_weak = ui_weak.clone();
+        let data = data.clone();
+        let path = path.clone();
+        let settings_cb = settings.clone();
+        settings.on_theme_changed(move |theme| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let theme = normalize_theme(theme.as_str());
+            {
+                let mut d = data.borrow_mut();
+                if d.theme != theme {
+                    d.theme = theme.clone();
+                    let _ = data::save(&d, &path);
+                }
+            }
+            apply_theme(&ui, &settings_cb, &theme);
+            ui.set_status_text(format!("Theme set to {theme}").into());
         });
     }
 

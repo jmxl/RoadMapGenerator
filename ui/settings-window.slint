@@ -1,0 +1,47 @@
+import { Button, ComboBox, StyleMetrics } from "std-widgets.slint";
+
+export component SettingsWindow inherits Window {
+    title: "Settings";
+    icon: @image-url("icon/settings.png");
+    width: 420px;
+    height: 220px;
+
+    // UI theme: "auto" (follow system), "light" or "dark".
+    in-out property <string> theme: "auto";
+    callback theme-changed(string);
+
+    property <bool> dark: StyleMetrics.window-background.to-oklch().lightness < 0.5;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 16px;
+
+        Text {
+            text: "Theme";
+            font-size: 14px;
+            font-weight: 700;
+            color: dark ? #e2e8f0 : #0f172a;
+        }
+        ComboBox {
+            model: ["Follow System", "Light", "Dark"];
+            current-index: root.theme == "auto" ? 0 : (root.theme == "light" ? 1 : 2);
+            selected() => {
+                root.theme = self.current-index == 0 ? "auto" : (self.current-index == 1 ? "light" : "dark");
+                root.theme-changed(root.theme);
+            }
+        }
+        Text {
+            text: "Changes apply immediately and are saved to roadmap.json.";
+            font-size: 12px;
+            color: dark ? #8b98ab : #64748b;
+        }
+
+        HorizontalLayout {
+            alignment: end;
+            Button {
+                text: "Close";
+                clicked => { root.close(); }
+            }
+        }
+    }
+}
