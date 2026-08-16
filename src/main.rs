@@ -63,21 +63,30 @@ fn config_path() -> PathBuf {
 }
 
 /// Shared, mutable application state handed to every UI callback: the roadmap
-/// data and the settings, each behind a `RefCell`. The JSON file paths are
-/// derived from `ConfigData` (see `AppContext::data_path`), so they can never
-/// drift from the configured data directory. Callbacks capture a single
-/// `Rc<AppContext>` instead of cloning state individually; `ui` is only ever
-/// captured as a weak handle to avoid an `Rc` cycle.
+/// data, the settings, and the path of the *current* data file (the one the
+/// data was loaded from and will be saved back to). The data file starts as
+/// the `data.json` under the configured data directory (`ConfigData.data_dir`)
+/// and follows File > Open / Save As; the settings window's "Save Location"
+/// switches it back to the configured directory's `data.json`. Callbacks
+/// capture a single `Rc<AppContext>` instead of cloning state individually;
+/// `ui` is only ever captured as a weak handle to avoid an `Rc` cycle.
 struct AppContext {
     data: RefCell<RoadmapData>,
     config: RefCell<ConfigData>,
+    data_file: RefCell<PathBuf>,
 }
 
 impl AppContext {
-    /// Path of the roadmap data file, always derived from the configured data
-    /// directory so it stays in sync with `ConfigData.data_dir`.
+    /// Path of the current data file (what File > Save and the exit save
+    /// write to).
     fn data_path(&self) -> PathBuf {
-        data_path(&self.config.borrow())
+        self.data_file.borrow().clone()
+    }
+
+    /// Switch the current data file (e.g. after File > Open / Save As, or
+    /// after the "Save Location" setting changed the data directory).
+    fn set_data_file(&self, path: PathBuf) {
+        *self.data_file.borrow_mut() = path;
     }
 
     /// Persist the roadmap, surfacing a failure in the status bar (and stderr).
@@ -310,6 +319,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Rc::new(AppContext {
         data: RefCell::new(data::load(&data_file)),
         config: RefCell::new(config),
+        data_file: RefCell::new(data_file.clone()),
     });
 
     let ui = AppWindow::new()?;
@@ -627,6 +637,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match data::load_result(&path) {
                 Ok(loaded) => {
                     let n = loaded.projects.len();
+                    // The opened file becomes the current data file, so File >
+                    // Save (and the exit save) write back to it, not to the
+                    // configured default.
+                    app.set_data_file(path.clone());
                     *app.data.borrow_mut() = loaded;
                     refresh_ui(&ui, &app.data.borrow());
                     ui.set_status_text(i18n::sub(i18n::t("status-opened"), &[("n", n.to_string()), ("path", path.display().to_string())]).into());
@@ -700,8 +714,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("Failed to save roadmap data to {}: {e}", path.display());
                 return;
             }
-            // Switch the save location to the picked file's folder and persist
-            // the config, keeping the settings window's path in sync.
+            // Switch the current data file and the configured data directory
+            // (keeping the settings window's path in sync), so File > Save and
+            // the exit save land in the picked file's folder.
             {
                 let mut c = app.config.borrow_mut();
                 if let Some(dir) = path.parent() {
@@ -709,6 +724,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     app.save_config_or_status(&ui, &c);
                 }
             }
+            app.set_data_file(path.clone());
             settings_cb.set_data_dir_path(app.data_path().display().to_string().into());
             ui.set_status_text(i18n::sub(i18n::t("status-saved"), &[("path", path.display().to_string())]).into());
         });
@@ -731,8 +747,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 c.data_dir = Some(dir.display().to_string());
                 app.save_config_or_status(&ui, &c);
             }
-            let data_file = app.data_path();
+            let data_file = data_path(&app.config.borrow());
             *app.data.borrow_mut() = data::load(&data_file);
+            app.set_data_file(data_file.clone());
             refresh_ui(&ui, &app.data.borrow());
             settings_cb.set_data_dir_path(data_file.display().to_string().into());
             ui.set_status_text(i18n::sub(i18n::t("status-data-dir-changed"), &[("path", data_file.display().to_string())]).into());
@@ -753,8 +770,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     app.save_config_or_status(&ui, &c);
                 }
             }
-            let data_file = app.data_path();
+            let data_file = data_path(&app.config.borrow());
             *app.data.borrow_mut() = data::load(&data_file);
+            app.set_data_file(data_file.clone());
             refresh_ui(&ui, &app.data.borrow());
             settings_cb.set_data_dir_path(data_file.display().to_string().into());
             ui.set_status_text(i18n::sub(i18n::t("status-data-dir-reset"), &[("path", data_file.display().to_string())]).into());
