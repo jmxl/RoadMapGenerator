@@ -5,6 +5,8 @@ use std::path::Path;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
+use crate::i18n;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MilestoneData {
     pub name: String,
@@ -24,12 +26,25 @@ pub struct ProjectData {
     pub milestones: Vec<MilestoneData>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RoadmapData {
     pub projects: Vec<ProjectData>,
     /// UI theme preference: "auto" (follow system), "light" or "dark".
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// UI language code: "en" (English) or "zh" (中文).
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+impl Default for RoadmapData {
+    fn default() -> Self {
+        Self {
+            projects: Vec::new(),
+            theme: default_theme(),
+            language: default_language(),
+        }
+    }
 }
 
 /// Default UI theme (follow the system color scheme).
@@ -37,11 +52,24 @@ pub fn default_theme() -> String {
     "auto".into()
 }
 
+/// Default UI language (English).
+pub fn default_language() -> String {
+    "en".into()
+}
+
 /// Normalize an arbitrary theme string to one of "auto" / "light" / "dark".
 pub fn normalize_theme(s: &str) -> String {
     match s {
         "light" | "dark" => s.to_string(),
         _ => default_theme(),
+    }
+}
+
+/// Normalize an arbitrary language string to "en" / "zh".
+pub fn normalize_language(s: &str) -> String {
+    match s {
+        "zh" => "zh".to_string(),
+        _ => default_language(),
     }
 }
 
@@ -84,14 +112,14 @@ pub fn text_width(s: &str, font_size: f32) -> f32 {
 pub fn parse_date(s: &str) -> Result<NaiveDate, String> {
     let t = s.trim();
     if t.is_empty() {
-        return Err("Date is required".into());
+        return Err(i18n::t("err-date-required").into());
     }
     for fmt in ["%Y/%m/%d", "%Y-%m-%d", "%Y.%m.%d"] {
         if let Ok(d) = NaiveDate::parse_from_str(t, fmt) {
             return Ok(d);
         }
     }
-    Err(format!("Invalid date \"{t}\". Please use yyyy/mm/dd."))
+    Err(i18n::sub(i18n::t("err-invalid-date"), &[("t", t.to_string())]))
 }
 
 /// Add a milestone to an existing project (case-insensitive match), or
@@ -106,10 +134,10 @@ pub fn add_milestone(
     let pname = project.trim();
     let mname = milestone.trim();
     if pname.is_empty() {
-        return Err("Project name is required".into());
+        return Err(i18n::t("err-project-required").into());
     }
     if mname.is_empty() {
-        return Err("Milestone name is required".into());
+        return Err(i18n::t("err-milestone-required").into());
     }
     let date = parse_date(date)?;
     let color = parse_color(color)?;
@@ -117,7 +145,7 @@ pub fn add_milestone(
     match data.projects.iter_mut().find(|p| p.name.eq_ignore_ascii_case(pname)) {
         Some(p) => {
             if p.milestones.iter().any(|m| m.name.eq_ignore_ascii_case(mname)) {
-                return Err(format!("Milestone \"{mname}\" already exists in project \"{pname}\""));
+                return Err(i18n::sub(i18n::t("err-duplicate-milestone"), &[("m", mname.to_string()), ("p", pname.to_string())]));
             }
             p.milestones.push(MilestoneData { name: mname.to_string(), date, color });
         }
@@ -135,10 +163,10 @@ pub fn add_milestone(
 pub fn add_project(data: &mut RoadmapData, project: &str) -> Result<(), String> {
     let pname = project.trim();
     if pname.is_empty() {
-        return Err("Project name is required".into());
+        return Err(i18n::t("err-project-required").into());
     }
     if data.projects.iter().any(|p| p.name.eq_ignore_ascii_case(pname)) {
-        return Err(format!("Project \"{pname}\" already exists"));
+        return Err(i18n::sub(i18n::t("err-duplicate-project"), &[("p", pname.to_string())]));
     }
     data.projects.push(ProjectData { name: pname.to_string(), milestones: Vec::new() });
     Ok(())
@@ -159,17 +187,17 @@ pub fn format_date(date: NaiveDate) -> String {
 pub fn parse_color(s: &str) -> Result<String, String> {
     let t = s.trim();
     if t.is_empty() {
-        return Err("Color is empty".into());
+        return Err(i18n::t("err-color-empty").into());
     }
     // rgb(r,g,b) or r,g,b
     if t.contains(',') {
         let parts: Vec<&str> = t.split(',').collect();
         if parts.len() != 3 {
-            return Err(format!("Invalid color \"{t}\". Use #RRGGBB or r,g,b."));
+            return Err(i18n::sub(i18n::t("err-invalid-color"), &[("t", t.to_string())]));
         }
         let mut rgb = [0u8; 3];
         for (i, p) in parts.iter().enumerate() {
-            let v: u8 = p.trim().parse().map_err(|_| format!("Invalid color \"{t}\". Use #RRGGBB or r,g,b."))?;
+            let v: u8 = p.trim().parse().map_err(|_| i18n::sub(i18n::t("err-invalid-color"), &[("t", t.to_string())]))?;
             rgb[i] = v;
         }
         return Ok(format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]));
@@ -177,9 +205,9 @@ pub fn parse_color(s: &str) -> Result<String, String> {
     // #RRGGBB or RRGGBB
     let h = t.strip_prefix('#').unwrap_or(t);
     if h.len() != 6 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("Invalid color \"{t}\". Use #RRGGBB or r,g,b."));
+        return Err(i18n::sub(i18n::t("err-invalid-color"), &[("t", t.to_string())]));
     }
-    let v = u32::from_str_radix(h, 16).map_err(|_| format!("Invalid color \"{t}\""))?;
+    let v = u32::from_str_radix(h, 16).map_err(|_| i18n::sub(i18n::t("err-invalid-color"), &[("t", t.to_string())]))?;
     Ok(format!("#{:06X}", v & 0xFFFFFF))
 }
 
@@ -262,7 +290,21 @@ mod tests {
         let json = r##"{"projects":[{"name":"SPN","milestones":[{"name":"TR1","date":"2026-08-20","color":"#2563EB"}]}]}"##;
         let data: RoadmapData = serde_json::from_str(json).unwrap();
         assert_eq!(data.theme, "auto");
+        assert_eq!(data.language, "en");
         assert_eq!(data.projects.len(), 1);
+    }
+
+    #[test]
+    fn normalize_language_maps_unknown_values_to_en() {
+        assert_eq!(normalize_language("en"), "en");
+        assert_eq!(normalize_language("zh"), "zh");
+        assert_eq!(normalize_language(""), "en");
+        assert_eq!(normalize_language("banana"), "en");
+    }
+
+    #[test]
+    fn default_language_is_english() {
+        assert_eq!(RoadmapData::default().language, "en");
     }
 
     #[test]

@@ -1,0 +1,35 @@
+// Every user-visible string, in English by default. Rust (`apply_language` in
+// main.rs) overwrites all properties at startup and whenever the language is
+// switched in the settings window. The global is one instance per compilation
+// unit, so all three windows see the same values.
+// Keep the English defaults in sync with src/i18n.rs.
+export global I18n {
+    in-out property <string> app-title: "Roadmap Generator";
+    in-out property <string> menu-settings: "Settings";
+    in-out property <string> menu-help: "Help";
+    in-out property <string> menu-about: "About";
+    in-out property <string> placeholder-project: "Project name  (e.g. XXX)";
+    in-out property <string> placeholder-milestone: "Milestone  (e.g. TR1)";
+    in-out property <string> placeholder-date: "Date  (yyyy/mm/dd)";
+    in-out property <string> btn-add-milestone: "Add Milestone";
+    in-out property <string> label-color: "Color:";
+    in-out property <[string]> color-names: ["Blue", "Red", "Green", "Orange", "Purple", "Teal", "Gray", "Crimson", "Black"];
+    in-out property <string> btn-new-project: "New Project";
+    in-out property <string> btn-remove-project: "Remove Selected Project";
+    in-out property <string> btn-remove-milestone: "Remove Selected Milestone";
+    in-out property <string> btn-clear-all: "Clear All";
+    in-out property <string> btn-export-svg: "Export SVG";
+    in-out property <string> btn-export-png: "Export PNG";
+    in-out property <string> today-label: "We are here";
+    in-out property <string> empty-hint: "No projects yet - add one above.";
+    in-out property <string> settings-title: "Settings";
+    in-out property <string> theme-label: "Theme";
+    in-out property <[string]> theme-options: ["Follow System", "Light", "Dark"];
+    in-out property <string> theme-hint: "Changes apply immediately and are saved to roadmap.json.";
+    in-out property <string> lang-label: "Language";
+    in-out property <[string]> lang-options: ["English", "中文"];
+    in-out property <string> lang-hint: "Changes apply immediately and are saved to roadmap.json.";
+    in-out property <string> btn-close: "Close";
+    in-out property <string> about-title: "About";
+    in-out property <string> about-btn: "OK";
+}

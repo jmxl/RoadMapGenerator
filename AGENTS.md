@@ -14,11 +14,12 @@ Desktop roadmap planner (Slint UI + Rust). Projects are rows with milestones on 
 - `src/data.rs` — pure data model (`RoadmapData`/`ProjectData`/`MilestoneData`), JSON load/save, date & color parsing, day-number math, `text_width` heuristic. No Slint dependency.
 - `src/export.rs` — hand-built SVG string + PNG rasterization (resvg @2x) + `rfd` save dialogs.
 - `src/main.rs` — everything else: `slint::include_modules!()`, converts `data` ↔ Slint models, all `on_request_*` callback wiring.
-- `ui/app-window.slint` — main component. `ui/about-dialog.slint` is pulled in via `import`/`export` in `app-window.slint` so `AboutDialog` gets a generated Rust type.
+- `src/i18n.rs` — EN/ZH dictionary + process-wide current language (`t`/`t_in`/`t_list`/`sub`). No Slint dependency.
+- `ui/app-window.slint` — main component. `ui/about-dialog.slint` is pulled in via `import`/`export` in `app-window.slint` so `AboutDialog` gets a generated Rust type. `ui/i18n.slint` holds the shared `I18n` global (all UI strings).
 
 ### Slint codegen gotcha
 
-`build.rs` compiles **only** `ui/app-window.slint` via `slint_build::compile`. Any new `.slint` file must be `import`ed from `app-window.slint` (or added to `build.rs`) or it is never compiled. UI strings are English; the about dialog is partially Chinese.
+`build.rs` compiles **only** `ui/app-window.slint` via `slint_build::compile`. Any new `.slint` file must be `import`ed from `app-window.slint` (or added to `build.rs`) or it is never compiled. All UI strings are localized (EN/ZH) — see the i18n invariant below.
 
 ## Non-obvious invariants (do not break)
 
@@ -26,6 +27,7 @@ Desktop roadmap planner (Slint UI + Rust). Projects are rows with milestones on 
 - **`roadmap.json` location**: `data_path()` uses `current_dir()`, not `current_exe()` — project root for `cargo run`, exe folder when the exe is double-clicked. The file is gitignored; it's auto-saved after every mutation and on exit.
 - **Dates**: JSON stores chrono `NaiveDate` (ISO `yyyy-mm-dd`); input parsing accepts `yyyy/mm/dd`, `yyyy-mm-dd`, `yyyy.mm.dd`; UI displays `yyyy/mm/dd`.
 - **Colors** are normalized to uppercase `#RRGGBB` (`data::parse_color`; accepts `#RRGGBB`, `RRGGBB`, `r,g,b`). Default is brand blue `#2563eb` via serde default. Milestone colors stored per-milestone; a selected project recolors all its milestones, a selected milestone recolors only itself.
+- **i18n**: All user-visible strings (EN/ZH) live in the dictionary in `src/i18n.rs` (`t`/`t_in`/`t_list`; `{name}` placeholders are filled with `i18n::sub`, never `format!` — it rejects runtime format strings). The UI layer copies them into the `I18n` global in `ui/i18n.slint` via `apply_language` (main.rs); all three `.slint` files import it and re-export through `app-window.slint`. The language is persisted as `RoadmapData.language` (`"en"`/`"zh"`, serde default `"en"`); the process-wide current language is `i18n::set_current`, so data/export error strings translate without threading a language parameter. `build_models` fills `Project.milestone-count` per language, and `refresh_ui` is re-run on language switch to update those rows.
 - **`data::text_width`** (0.6em ASCII / 1.0em CJK heuristic) sizes both the UI name column and the SVG export layout — keep both usages in sync when changing font metrics.
 
 ## Platform quirks

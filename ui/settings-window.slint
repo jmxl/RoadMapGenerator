@@ -1,14 +1,18 @@
 import { Button, ComboBox, StyleMetrics } from "std-widgets.slint";
+import { I18n } from "i18n.slint";
 
 export component SettingsWindow inherits Window {
-    title: "Settings";
+    title: I18n.settings-title;
     icon: @image-url("icon/settings.png");
     width: 420px;
-    height: 220px;
+    height: 320px;
 
     // UI theme: "auto" (follow system), "light" or "dark".
     in-out property <string> theme: "auto";
     callback theme-changed(string);
+    // UI language code: "en" (English) or "zh" (中文).
+    in-out property <string> language: "en";
+    callback language-changed(string);
 
     property <bool> dark: StyleMetrics.window-background.to-oklch().lightness < 0.5;
 
@@ -17,13 +21,13 @@ export component SettingsWindow inherits Window {
         spacing: 16px;
 
         Text {
-            text: "Theme";
+            text: I18n.theme-label;
             font-size: 14px;
             font-weight: 700;
             color: dark ? #e2e8f0 : #0f172a;
         }
         ComboBox {
-            model: ["Follow System", "Light", "Dark"];
+            model: I18n.theme-options;
             current-index: root.theme == "auto" ? 0 : (root.theme == "light" ? 1 : 2);
             selected() => {
                 root.theme = self.current-index == 0 ? "auto" : (self.current-index == 1 ? "light" : "dark");
@@ -31,7 +35,32 @@ export component SettingsWindow inherits Window {
             }
         }
         Text {
-            text: "Changes apply immediately and are saved to roadmap.json.";
+            text: I18n.theme-hint;
+            font-size: 12px;
+            color: dark ? #8b98ab : #64748b;
+        }
+
+        Rectangle {
+            height: 1px;
+            background: dark ? #3b4453 : #dde5ee;
+        }
+
+        Text {
+            text: I18n.lang-label;
+            font-size: 14px;
+            font-weight: 700;
+            color: dark ? #e2e8f0 : #0f172a;
+        }
+        ComboBox {
+            model: I18n.lang-options;
+            current-index: root.language == "zh" ? 1 : 0;
+            selected() => {
+                root.language = self.current-index == 0 ? "en" : "zh";
+                root.language-changed(root.language);
+            }
+        }
+        Text {
+            text: I18n.lang-hint;
             font-size: 12px;
             color: dark ? #8b98ab : #64748b;
         }
@@ -39,7 +68,7 @@ export component SettingsWindow inherits Window {
         HorizontalLayout {
             alignment: end;
             Button {
-                text: "Close";
+                text: I18n.btn-close;
                 clicked => { root.close(); }
             }
         }

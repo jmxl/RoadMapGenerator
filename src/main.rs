@@ -3,6 +3,7 @@
 
 mod data;
 mod export;
+mod i18n;
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -83,6 +84,7 @@ fn build_models(data: &RoadmapData) -> (ModelRc<Project>, i32, i32) {
         projects.push(Project {
             name: p.name.clone().into(),
             milestones: ms_model.into(),
+            milestone_count: i18n::sub(i18n::t("milestone-count"), &[("n", p.milestones.len().to_string())]).into(),
         });
     }
 
@@ -121,6 +123,60 @@ fn apply_theme(ui: &AppWindow, settings: &SettingsWindow, theme: &str) {
     settings.set_theme(theme.into());
 }
 
+/// Push the translated strings for `lang` into the `I18n` global of every
+/// window and sync the settings window's language picker.
+///
+/// Slint globals are per component instance: each `::new()`'d window owns a
+/// separate copy of the `I18n` global (the same reason `apply_theme` sets
+/// `Palette` on both windows explicitly), so updating through one window
+/// never reaches the others. All three must be written explicitly.
+fn apply_language(ui: &AppWindow, settings: &SettingsWindow, about: &AboutDialog, lang: i18n::Lang) {
+    set_i18n_globals(&ui.global::<I18n>(), lang);
+    set_i18n_globals(&settings.global::<I18n>(), lang);
+    set_i18n_globals(&about.global::<I18n>(), lang);
+    settings.set_language(lang.code().into());
+}
+
+/// Write every translated string into one window's `I18n` global instance.
+fn set_i18n_globals(g: &I18n, lang: i18n::Lang) {
+    use i18n::t_in as t;
+    g.set_app_title(t(lang, "app-title").into());
+    g.set_menu_settings(t(lang, "menu-settings").into());
+    g.set_menu_help(t(lang, "menu-help").into());
+    g.set_menu_about(t(lang, "menu-about").into());
+    g.set_placeholder_project(t(lang, "placeholder-project").into());
+    g.set_placeholder_milestone(t(lang, "placeholder-milestone").into());
+    g.set_placeholder_date(t(lang, "placeholder-date").into());
+    g.set_btn_add_milestone(t(lang, "btn-add-milestone").into());
+    g.set_label_color(t(lang, "label-color").into());
+    g.set_btn_new_project(t(lang, "btn-new-project").into());
+    g.set_btn_remove_project(t(lang, "btn-remove-project").into());
+    g.set_btn_remove_milestone(t(lang, "btn-remove-milestone").into());
+    g.set_btn_clear_all(t(lang, "btn-clear-all").into());
+    g.set_btn_export_svg(t(lang, "btn-export-svg").into());
+    g.set_btn_export_png(t(lang, "btn-export-png").into());
+    g.set_today_label(t(lang, "today-label").into());
+    g.set_empty_hint(t(lang, "empty-hint").into());
+    g.set_settings_title(t(lang, "settings-title").into());
+    g.set_theme_label(t(lang, "theme-label").into());
+    g.set_theme_hint(t(lang, "theme-hint").into());
+    g.set_lang_label(t(lang, "lang-label").into());
+    g.set_lang_hint(t(lang, "lang-hint").into());
+    g.set_btn_close(t(lang, "btn-close").into());
+    g.set_about_title(t(lang, "about-title").into());
+    g.set_about_btn(t(lang, "about-btn").into());
+
+    let to_model = |list: &'static [&'static str]| -> ModelRc<slint::SharedString> {
+        Rc::new(VecModel::from(
+            list.iter().map(|s| slint::SharedString::from(*s)).collect::<Vec<_>>(),
+        ))
+        .into()
+    };
+    g.set_color_names(to_model(i18n::t_list(lang, "color-names")));
+    g.set_theme_options(to_model(i18n::t_list(lang, "theme-options")));
+    g.set_lang_options(to_model(i18n::t_list(lang, "lang-options")));
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = data_path();
     let data = Rc::new(RefCell::new(data::load(&path)));
@@ -133,12 +189,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = Rc::new(SettingsWindow::new()?);
     apply_theme(&ui, &settings, data.borrow().theme.as_str());
 
+    // About dialog is created up front (like the settings window) so its
+    // `I18n` global can be filled at startup and on language switch.
+    let about = Rc::new(AboutDialog::new()?);
+
+    // Language: normalize the persisted code, make it the process-wide current
+    // language, then push every translated string into the UI.
+    let lang = i18n::Lang::from_code(&data::normalize_language(&data.borrow().language));
+    i18n::set_current(lang);
+    apply_language(&ui, &settings, &about, lang);
+
     {
         let n = data.borrow().projects.len();
         if n > 0 {
-            ui.set_status_text(format!("Loaded {n} project(s) from {}", path.display()).into());
+            ui.set_status_text(i18n::sub(i18n::t("status-loaded"), &[("n", n.to_string()), ("path", path.display().to_string())]).into());
         } else {
-            ui.set_status_text(format!("No saved data yet - data file: {}", path.display()).into());
+            ui.set_status_text(i18n::sub(i18n::t("status-no-data"), &[("path", path.display().to_string())]).into());
         }
     }
 
@@ -158,7 +224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     refresh_ui(&ui, &d);
                     ui.set_milestone_name("".into());
                     ui.set_milestone_date("".into());
-                    ui.set_status_text(format!("Added milestone \"{milestone}\" ({date}) to \"{project}\"").into());
+                    ui.set_status_text(i18n::sub(i18n::t("status-added"), &[("milestone", milestone.to_string()), ("date", date.to_string()), ("project", project.to_string())]).into());
                     let _ = data::save(&d, &path);
                 }
                 Err(e) => ui.set_status_text(e.into()),
@@ -206,7 +272,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ui.set_selected_milestone(midx);
                             ui.set_selected_milestone_name(ms_name.into());
                             let _ = data::save(&d, &path);
-                            ui.set_status_text(format!("Milestone color set to {color}").into());
+                            ui.set_status_text(i18n::sub(i18n::t("status-color-milestone"), &[("color", color.to_string())]).into());
                         } else {
                             // Only the project is selected: recolor all its milestones.
                             let name = d.projects[pidx as usize].name.clone();
@@ -218,11 +284,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ui.set_selected_milestone(-1);
                             let _ = data::save(&d, &path);
                             ui.set_status_text(
-                                format!("Color set to {color} for all milestones of \"{name}\"").into(),
+                                i18n::sub(i18n::t("status-color-project"), &[("color", color.to_string()), ("name", name.to_string())]).into(),
                             );
                         }
                     } else {
-                        ui.set_status_text(format!("Color set to {color} (select a project or milestone to apply it)").into());
+                        ui.set_status_text(i18n::sub(i18n::t("status-color-noselect"), &[("color", color.to_string())]).into());
                     }
                 }
                 Err(e) => ui.set_status_text(e.into()),
@@ -242,7 +308,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(()) => {
                     refresh_ui(&ui, &d);
                     ui.set_project_name("".into());
-                    ui.set_status_text(format!("Created project \"{project}\"").into());
+                    ui.set_status_text(i18n::sub(i18n::t("status-created"), &[("project", project.to_string())]).into());
                     let _ = data::save(&d, &path);
                 }
                 Err(e) => ui.set_status_text(e.into()),
@@ -259,7 +325,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let Some(ui) = weak.upgrade() else { return };
             let idx = ui.get_selected_project();
             if idx < 0 {
-                ui.set_status_text("Select a project row first".into());
+                ui.set_status_text(i18n::t("status-select-project").into());
                 return;
             }
             let mut d = data.borrow_mut();
@@ -267,7 +333,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let name = d.projects[idx as usize].name.clone();
                 d.projects.remove(idx as usize);
                 refresh_ui(&ui, &d);
-                ui.set_status_text(format!("Removed project \"{name}\"").into());
+                ui.set_status_text(i18n::sub(i18n::t("status-removed-project"), &[("name", name.to_string())]).into());
                 let _ = data::save(&d, &path);
             }
         });
@@ -283,7 +349,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let pidx = ui.get_selected_project();
             let ms_name = ui.get_selected_milestone_name().to_string();
             if pidx < 0 || ms_name.is_empty() {
-                ui.set_status_text("Select a milestone on the timeline first".into());
+                ui.set_status_text(i18n::t("status-select-milestone").into());
                 return;
             }
             let mut d = data.borrow_mut();
@@ -296,10 +362,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let name = p.milestones[pos].name.clone();
                         p.milestones.remove(pos);
                         refresh_ui(&ui, &d);
-                        ui.set_status_text(format!("Removed milestone \"{name}\" from \"{project_name}\"").into());
+                        ui.set_status_text(i18n::sub(i18n::t("status-removed-milestone"), &[("name", name.to_string()), ("project", project_name.to_string())]).into());
                         let _ = data::save(&d, &path);
                     }
-                    None => ui.set_status_text(format!("Milestone \"{ms_name}\" not found in \"{project_name}\"").into()),
+                    None => ui.set_status_text(i18n::sub(i18n::t("status-ms-not-found"), &[("name", ms_name.to_string()), ("project", project_name.to_string())]).into()),
                 }
             }
         });
@@ -315,7 +381,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut d = data.borrow_mut();
             d.projects.clear();
             refresh_ui(&ui, &d);
-            ui.set_status_text("Cleared all projects".into());
+            ui.set_status_text(i18n::t("status-cleared").into());
             let _ = data::save(&d, &path);
         });
     }
@@ -373,14 +439,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             apply_theme(&ui, &settings_cb, &theme);
-            ui.set_status_text(format!("Theme set to {theme}").into());
+            ui.set_status_text(i18n::sub(i18n::t("status-theme"), &[("theme", theme.to_string())]).into());
+        });
+    }
+
+    // Language changes from the settings window: persist, then re-apply every
+    // translated string to all three windows and rebuild the models
+    // (milestone counts are localized).
+    {
+        let ui_weak = ui_weak.clone();
+        let data = data.clone();
+        let path = path.clone();
+        let settings_cb = settings.clone();
+        let about_cb = about.clone();
+        settings.on_language_changed(move |code| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let lang = i18n::Lang::from_code(code.as_str());
+            i18n::set_current(lang);
+            {
+                let mut d = data.borrow_mut();
+                if d.language != lang.code() {
+                    d.language = lang.code().into();
+                    let _ = data::save(&d, &path);
+                }
+            }
+            apply_language(&ui, &settings_cb, &about_cb, lang);
+            refresh_ui(&ui, &data.borrow());
+            ui.set_status_text(i18n::sub(i18n::t("status-language"), &[("label", lang.label().to_string())]).into());
         });
     }
 
     // About dialog.
     {
-        let about = Rc::new(AboutDialog::new()?);
-        let about = about.clone(); // strong ref moved into the closure
+        let about = about.clone();
         ui.on_request_about(move || {
             let _ = about.show();
         });

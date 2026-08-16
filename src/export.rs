@@ -1,6 +1,7 @@
 //! SVG generation and PNG rasterization for roadmap export.
 
 use crate::data::{day_number, format_date, RoadmapData};
+use crate::i18n::{self, Lang};
 
 const W: f32 = 1200.0;
 const X1: f32 = 1160.0; // timeline right edge
@@ -31,8 +32,9 @@ fn truncate(s: &str, max_chars: usize) -> String {
 
 /// Build an SVG document for the roadmap dataset.
 pub fn build_svg(data: &RoadmapData) -> Result<String, String> {
+    let lang = Lang::from_code(&data.language);
     if data.projects.is_empty() {
-        return Err("Nothing to export yet - add at least one project".into());
+        return Err(i18n::t_in(lang, "err-nothing-projects").into());
     }
 
     let all_days: Vec<i32> = data
@@ -41,7 +43,7 @@ pub fn build_svg(data: &RoadmapData) -> Result<String, String> {
         .flat_map(|p| p.milestones.iter().map(|m| day_number(m.date)))
         .collect();
     if all_days.is_empty() {
-        return Err("Nothing to export yet - add at least one milestone with a date".into());
+        return Err(i18n::t_in(lang, "err-nothing-milestones").into());
     }
 
     let gmin = *all_days.iter().min().unwrap();
@@ -129,7 +131,8 @@ pub fn build_svg(data: &RoadmapData) -> Result<String, String> {
         let x = x_of(today);
         // label sits right above the line, horizontally centered on it
         s.push_str(&format!(
-            r##"<text x="{x:.1}" y="16" font-size="12" font-weight="700" fill="#dc2626" text-anchor="middle">We are here</text>"##
+            r##"<text x="{x:.1}" y="16" font-size="12" font-weight="700" fill="#dc2626" text-anchor="middle">{}</text>"##,
+            i18n::t_in(lang, "today-label")
         ));
         // dashed line starts just below the label text (baseline 16 + descent ≈ 20)
         s.push_str(&format!(
@@ -177,6 +180,7 @@ pub fn render_png(svg: &str) -> Result<Vec<u8>, String> {
 
 /// Show a save dialog and write the SVG file.
 pub fn export_svg(data: &RoadmapData) -> Result<String, String> {
+    let lang = Lang::from_code(&data.language);
     let svg = build_svg(data)?;
     let dialog = rfd::FileDialog::new()
         .add_filter("SVG image", &["svg"])
@@ -184,13 +188,14 @@ pub fn export_svg(data: &RoadmapData) -> Result<String, String> {
     match dialog.save_file() {
         Some(path) => std::fs::write(&path, &svg)
             .map_err(|e| e.to_string())
-            .map(|_| format!("SVG saved to {}", path.display())),
-        None => Err("Export cancelled".into()),
+            .map(|_| i18n::sub(i18n::t_in(lang, "status-svg-saved"), &[("path", path.display().to_string())])),
+        None => Err(i18n::t_in(lang, "err-export-cancelled").into()),
     }
 }
 
 /// Show a save dialog and write the PNG file.
 pub fn export_png(data: &RoadmapData) -> Result<String, String> {
+    let lang = Lang::from_code(&data.language);
     let svg = build_svg(data)?;
     let bytes = render_png(&svg)?;
     let dialog = rfd::FileDialog::new()
@@ -199,8 +204,8 @@ pub fn export_png(data: &RoadmapData) -> Result<String, String> {
     match dialog.save_file() {
         Some(path) => std::fs::write(&path, bytes)
             .map_err(|e| e.to_string())
-            .map(|_| format!("PNG saved to {}", path.display())),
-        None => Err("Export cancelled".into()),
+            .map(|_| i18n::sub(i18n::t_in(lang, "status-png-saved"), &[("path", path.display().to_string())])),
+        None => Err(i18n::t_in(lang, "err-export-cancelled").into()),
     }
 }
 
@@ -213,6 +218,7 @@ mod tests {
     fn sample() -> RoadmapData {
         RoadmapData {
             theme: "auto".into(),
+            language: "en".into(),
             projects: vec![
                 ProjectData {
                     name: "SPN".into(),
@@ -247,7 +253,7 @@ mod tests {
     #[test]
     fn svg_rejects_empty_data() {
         assert!(build_svg(&RoadmapData::default()).is_err());
-        let no_ms = RoadmapData { theme: "auto".into(), projects: vec![ProjectData { name: "X".into(), milestones: vec![] }] };
+        let no_ms = RoadmapData { theme: "auto".into(), language: "en".into(), projects: vec![ProjectData { name: "X".into(), milestones: vec![] }] };
         assert!(build_svg(&no_ms).is_err());
     }
 
@@ -255,6 +261,7 @@ mod tests {
     fn svg_escapes_markup() {
         let data = RoadmapData {
             theme: "auto".into(),
+            language: "en".into(),
             projects: vec![ProjectData {
                 name: "<A&B>".into(),
                 milestones: vec![MilestoneData {

@@ -1,9 +1,10 @@
 import { Button, AboutSlint } from "std-widgets.slint";
+import { I18n } from "i18n.slint";
 
 export component AboutDialog inherits Dialog {
     width: 400px;
     height: 300px;
-    title: "关于";
+    title: I18n.about-title;
     icon: @image-url("icon/about.png");
     always-on-top: false;
     no-frame: false;
@@ -12,7 +13,7 @@ export component AboutDialog inherits Dialog {
         alignment: center;
         spacing: 10px;
         Text {
-            text: "Roadmap Generator";
+            text: I18n.app-title;
         }
         // Display the "Made with Slint" badge to comply with the
         // Slint Royalty-free license attribution requirement.
@@ -22,7 +23,7 @@ export component AboutDialog inherits Dialog {
         }
     }
     Button {
-        text: "确定";
+        text: I18n.about-btn;
         height: 30px;
         dialog-button-role: action;
         clicked => {
