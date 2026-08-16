@@ -139,6 +139,7 @@ export component AppWindow inherits Window {
 
                 // ---- color picker row ----
                 HorizontalLayout {
+                    cross-axis-alignment: center;
                     spacing: 8px;
                     Text {
                         text: "Color:";
@@ -153,10 +154,11 @@ export component AppWindow inherits Window {
                             root.color-preset-index = self.current-index;
                             root.request-set-color(root.preset-colors[self.current-index]);
                         }
+                        width: 120px;
                     }
                     Rectangle {
-                        width: 26px;
-                        height: 26px;
+                        width: 30px;
+                        height: 30px;
                         border-radius: 6px;
                         border-width: 1px;
                         border-color: root.dark ? #4b5563 : #cbd5e1;
@@ -183,6 +185,10 @@ export component AppWindow inherits Window {
                         enabled: root.selected-project >= 0 && root.selected-milestone >= 0;
                         clicked => { root.request-remove-selected-milestone(); }
                     }
+                    Button {
+                        text: "Clear All";
+                        clicked => { root.request-clear-all(); }
+                    }
                     Rectangle { horizontal-stretch: 1; }
                     Button {
                         text: "Export SVG";
@@ -191,10 +197,6 @@ export component AppWindow inherits Window {
                     Button {
                         text: "Export PNG";
                         clicked => { root.request-export-png(); }
-                    }
-                    Button {
-                        text: "Clear All";
-                        clicked => { root.request-clear-all(); }
                     }
                 }
             }
